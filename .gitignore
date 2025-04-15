@@ -1,5 +1,7 @@
 # Ignore all .env files in any subdirectory
 **/.env
+# Ignore all .env files in the root directory
+/.env
 
 # Node modules (if you're using Node.js)
 **/node_modules/
