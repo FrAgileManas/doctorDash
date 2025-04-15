@@ -1,0 +1,16 @@
+# Ignore all .env files in any subdirectory
+**/.env
+
+# Node modules (if you're using Node.js)
+**/node_modules/
+
+# Log files
+*.log
+
+# Build directories
+**/dist/
+**/build/
+
+# OS-specific files
+.DS_Store
+Thumbs.db

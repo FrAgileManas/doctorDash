@@ -1,5 +1,6 @@
 import express from 'express';
 import { loginUser, registerUser, getProfile, updateProfile, bookAppointment, listAppointment, cancelAppointment, paymentRazorpay, verifyRazorpay, paymentStripe, verifyStripe } from '../controllers/userController.js';
+import { addVital, getVitalsByDate, updateVital, deleteVital, getAllVitals } from '../controllers/vitalController.js';
 import upload from '../middleware/multer.js';
 import authUser from '../middleware/authUser.js';
 const userRouter = express.Router();
@@ -16,5 +17,12 @@ userRouter.post("/payment-razorpay", authUser, paymentRazorpay)
 userRouter.post("/verifyRazorpay", authUser, verifyRazorpay)
 userRouter.post("/payment-stripe", authUser, paymentStripe)
 userRouter.post("/verifyStripe", authUser, verifyStripe)
+
+// Vital tracking endpoints
+userRouter.post("/vitals", authUser, addVital)
+userRouter.get("/vitals", authUser, getVitalsByDate)
+userRouter.put("/vitals/:id", authUser, updateVital)
+userRouter.delete("/vitals/:id", authUser, deleteVital)
+userRouter.get("/all-vitals", authUser, getAllVitals)
 
 export default userRouter;
