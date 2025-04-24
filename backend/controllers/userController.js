@@ -255,7 +255,9 @@ const paymentRazorpay = async (req, res) => {
 
         // creation of an order
         const order = await razorpayInstance.orders.create(options)
-
+        if (!order) {
+            return res.json({ success: false, message: 'Something went wrong' })
+        }
         res.json({ success: true, order })
 
     } catch (error) {

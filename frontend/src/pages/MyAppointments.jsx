@@ -12,6 +12,7 @@ const MyAppointments = () => {
 
     const [appointments, setAppointments] = useState([])
     const [payment, setPayment] = useState('')
+    const [downloadingPrescription, setDownloadingPrescription] = useState(null)
 
     const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -42,6 +43,11 @@ const MyAppointments = () => {
             const { data } = await axios.post(backendUrl + '/api/user/cancel-appointment', { appointmentId }, { headers: { token } })
 
             if (data.success) {
+                // Check if the appointment was Paid
+                if (appointments.find(item => item._id === appointmentId).payment) {
+                    // If paid, show refund message
+                    toast.info("Appointment cancelled. Refund will be processed within 7-10 working days.")
+                }
                 toast.success(data.message)
                 getUserAppointments()
             } else {
@@ -55,7 +61,41 @@ const MyAppointments = () => {
 
     }
 
+    // Function to download prescription
+    const downloadPrescription = async (appointment) => {
+        if (!appointment.prescription) {
+            toast.info("Prescription not available yet. Wait for 30 mins before contacting support.")
+            return
+        }
+
+        try {
+            setDownloadingPrescription(appointment._id)
+            
+            // Create an anchor element and set properties for download
+            const link = document.createElement('a')
+            link.href = appointment.prescription
+            link.target = '_blank'
+            link.download = `Prescription_${appointment.docData.name}_${slotDateFormat(appointment.slotDate)}.pdf`
+            
+            // Append to document, click and then remove
+            document.body.appendChild(link)
+            link.click()
+            document.body.removeChild(link)
+            
+            setDownloadingPrescription(null)
+        } catch (error) {
+            console.log(error)
+            toast.error("Failed to download prescription. Please try again.")
+            setDownloadingPrescription(null)
+        }
+    }
+
     const initPay = (order) => {
+        if (!window.Razorpay) {
+            toast.error('Razorpay SDK not loaded. Please refresh the page.');
+            return;
+        }
+    
         const options = {
             key: import.meta.env.VITE_RAZORPAY_KEY_ID,
             amount: order.amount,
@@ -65,40 +105,58 @@ const MyAppointments = () => {
             order_id: order.id,
             receipt: order.receipt,
             handler: async (response) => {
-
-                console.log(response)
-
                 try {
-                    const { data } = await axios.post(backendUrl + "/api/user/verifyRazorpay", response, { headers: { token } });
+                    const { data } = await axios.post(
+                        backendUrl + "/api/user/verifyRazorpay",
+                        response,
+                        { headers: { token } }
+                    );
+    
                     if (data.success) {
-                        navigate('/my-appointments')
-                        getUserAppointments()
+                        toast.success("Payment successful");
+                        navigate('/my-appointments');
+                        getUserAppointments();
+                    } else {
+                        toast.error(data.message || "Payment verification failed");
                     }
                 } catch (error) {
-                    console.log(error)
-                    toast.error(error.message)
+                    console.log(error);
+                    toast.error(error.response?.data?.message || error.message);
                 }
+            },
+            theme: {
+                color: "#3399cc"
             }
         };
+    
         const rzp = new window.Razorpay(options);
         rzp.open();
+    
+        rzp.on('payment.failed', function (response) {
+            console.error('Payment failed:', response.error);
+            toast.error('Payment failed. Please try again.');
+        });
     };
-
-    // Function to make payment using razorpay
+    
     const appointmentRazorpay = async (appointmentId) => {
         try {
-            const { data } = await axios.post(backendUrl + '/api/user/payment-razorpay', { appointmentId }, { headers: { token } })
+            const { data } = await axios.post(
+                backendUrl + '/api/user/payment-razorpay',
+                { appointmentId },
+                { headers: { token } }
+            );
+    
             if (data.success) {
-                initPay(data.order)
-            }else{
-                toast.error(data.message)
+                initPay(data.order);
+            } else {
+                toast.error(data.message || "Failed to initiate payment");
             }
         } catch (error) {
-            console.log(error)
-            toast.error(error.message)
+            console.error(error);
+            toast.error(error.response?.data?.message || error.message);
         }
-    }
-
+    };
+    
     // Function to make payment using stripe
     const appointmentStripe = async (appointmentId) => {
         try {
@@ -114,8 +172,6 @@ const MyAppointments = () => {
             toast.error(error.message)
         }
     }
-
-
 
     useEffect(() => {
         if (token) {
@@ -142,9 +198,29 @@ const MyAppointments = () => {
                         </div>
                         <div></div>
                         <div className='flex flex-col gap-2 justify-end text-sm text-center'>
+                            {/* Download Prescription Button for completed appointments */}
+                            {item.isCompleted && (
+                                <button 
+                                    onClick={() => downloadPrescription(item)} 
+                                    className='sm:min-w-48 py-2 border border-primary rounded text-primary hover:bg-primary hover:text-white transition-all duration-300 flex items-center justify-center'
+                                    disabled={downloadingPrescription === item._id}
+                                >
+                                    {downloadingPrescription === item._id ? (
+                                        'Downloading...'
+                                    ) : (
+                                        <span className='flex items-center gap-1'>
+                                            Download Prescription
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                            </svg>
+                                        </span>
+                                    )}
+                                </button>
+                            )}
+                            
                             {!item.cancelled && !item.payment && !item.isCompleted && payment !== item._id && <button onClick={() => setPayment(item._id)} className='text-[#696969] sm:min-w-48 py-2 border rounded hover:bg-primary hover:text-white transition-all duration-300'>Pay Online</button>}
                             {/* {!item.cancelled && !item.payment && !item.isCompleted && payment === item._id && <button onClick={() => appointmentStripe(item._id)} className='text-[#696969] sm:min-w-48 py-2 border rounded hover:bg-gray-100 hover:text-white transition-all duration-300 flex items-center justify-center'><img className='max-w-20 max-h-5' src={assets.stripe_logo} alt="" /></button>} */}
-                            {/* {!item.cancelled && !item.payment && !item.isCompleted && payment === item._id && <button onClick={() => appointmentRazorpay(item._id)} className='text-[#696969] sm:min-w-48 py-2 border rounded hover:bg-gray-100 hover:text-white transition-all duration-300 flex items-center justify-center'><img className='max-w-20 max-h-5' src={assets.razorpay_logo} alt="" /></button>} */}
+                            {!item.cancelled && !item.payment && !item.isCompleted && payment === item._id && <button onClick={() => appointmentRazorpay(item._id)} className='text-[#696969] sm:min-w-48 py-2 border rounded hover:bg-gray-100 hover:text-white transition-all duration-300 flex items-center justify-center'><img className='max-w-20 max-h-5' src={assets.razorpay_logo} alt="" /></button>}
                             {!item.cancelled && item.payment && !item.isCompleted && <button className='sm:min-w-48 py-2 border rounded text-[#696969]  bg-[#EAEFFF]'>Paid</button>}
 
                             {item.isCompleted && <button className='sm:min-w-48 py-2 border border-green-500 rounded text-green-500'>Completed</button>}

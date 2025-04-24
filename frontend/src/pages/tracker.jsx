@@ -5,6 +5,8 @@ import { toast } from 'react-toastify';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import VitalsChart from '../components/vitalsChart';
+import * as XLSX from 'xlsx';
+
 const Tracker = () => {
   const { backendUrl, token, userData } = useContext(AppContext);
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -18,6 +20,19 @@ const Tracker = () => {
     time: new Date().toTimeString().slice(0, 5),
     note: ''
   });
+  
+  // Add selected vital type for chart
+  const [selectedVitalType, setSelectedVitalType] = useState('blood-pressure');
+  
+  // Export modal state
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportDateRange, setExportDateRange] = useState({
+    startDate: new Date(new Date().setDate(new Date().getDate() - 30)), // Default to last 30 days
+    endDate: new Date()
+  });
+  const [selectedVitalTypes, setSelectedVitalTypes] = useState([]);
+  const [exportInProgress, setExportInProgress] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
   
   // Check for user login
   useEffect(() => {
@@ -60,6 +75,28 @@ const Tracker = () => {
     }
   };
 
+  // Fetch vitals for a specific date
+  const fetchVitalsForDate = async (date) => {
+    if (!token) return [];
+
+    try {
+      const { data } = await axios.get(
+        `${backendUrl}/api/user/vitals?date=${formatDateForAPI(date)}`, 
+        { headers: { token } }
+      );
+      
+      if (data.success) {
+        return data.vitals || [];
+      } else {
+        console.error(data.message);
+        return [];
+      }
+    } catch (error) {
+      console.error("Error fetching vitals for date:", formatDateForAPI(date), error);
+      return [];
+    }
+  };
+
   useEffect(() => {
     fetchVitals();
   }, [selectedDate, token]);
@@ -71,6 +108,35 @@ const Tracker = () => {
       ...prevData,
       [name]: value
     }));
+  };
+
+  // Handle export date range changes
+  const handleExportDateChange = (e) => {
+    const { name, value } = e.target;
+    setExportDateRange(prev => ({
+      ...prev,
+      [name]: new Date(value)
+    }));
+  };
+
+  // Toggle vital type selection for export
+  const toggleVitalTypeSelection = (typeId) => {
+    setSelectedVitalTypes(prev => {
+      if (prev.includes(typeId)) {
+        return prev.filter(id => id !== typeId);
+      } else {
+        return [...prev, typeId];
+      }
+    });
+  };
+
+  // Select/deselect all vital types
+  const toggleAllVitalTypes = () => {
+    if (selectedVitalTypes.length === vitalTypeOptions.length) {
+      setSelectedVitalTypes([]);
+    } else {
+      setSelectedVitalTypes(vitalTypeOptions.map(option => option.id));
+    }
   };
 
   // Get vital type options
@@ -85,6 +151,108 @@ const Tracker = () => {
 
   // Get the current vital type info
   const currentVitalType = vitalTypeOptions.find(option => option.id === vitalData.type) || vitalTypeOptions[0];
+
+  // Handle chart vital type change
+  const handleVitalTypeChange = (e) => {
+    setSelectedVitalType(e.target.value);
+  };
+
+  // Get all dates between start and end dates
+  const getDatesBetween = (startDate, endDate) => {
+    const dates = [];
+    let currentDate = new Date(startDate);
+    
+    while (currentDate <= endDate) {
+      dates.push(new Date(currentDate));
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+    
+    return dates;
+  };
+
+  // Export vitals to Excel
+  const exportToExcel = async () => {
+    if (selectedVitalTypes.length === 0) {
+      toast.warning("Please select at least one vital type to export");
+      return;
+    }
+
+    try {
+      toast.info("Preparing export...");
+      setExportInProgress(true);
+      setExportProgress(0);
+      
+      // Get all dates between start and end date
+      const dateRange = getDatesBetween(exportDateRange.startDate, exportDateRange.endDate);
+      
+      // Fetch vitals for each date in the range
+      let allVitals = [];
+      
+      for (let i = 0; i < dateRange.length; i++) {
+        const date = dateRange[i];
+        const dayVitals = await fetchVitalsForDate(date);
+        
+        // Filter by selected vital types
+        const filteredVitals = dayVitals.filter(vital => 
+          selectedVitalTypes.includes(vital.type)
+        );
+        
+        allVitals = [...allVitals, ...filteredVitals];
+        
+        // Update progress
+        const progress = Math.round(((i + 1) / dateRange.length) * 100);
+        setExportProgress(progress);
+      }
+      
+      if (allVitals.length === 0) {
+        toast.info("No vitals data found for the selected date range and vital types");
+        setExportInProgress(false);
+        setShowExportModal(false);
+        return;
+      }
+      
+      // Process data for Excel
+      const excelData = allVitals.map(vital => {
+        const vitalTypeInfo = vitalTypeOptions.find(option => option.id === vital.type) || {
+          label: vital.type,
+          unit: '',
+          hasSecondaryValue: false
+        };
+        
+        return {
+          'Date': new Date(vital.date).toLocaleDateString(),
+          'Time': formatTime(vital.time),
+          'Type': vitalTypeInfo.label,
+          'Primary Value': vital.primaryValue + (vitalTypeInfo.unit ? ` ${vitalTypeInfo.unit}` : ''),
+          'Secondary Value': vitalTypeInfo.hasSecondaryValue && vital.secondaryValue ? 
+            vital.secondaryValue + (vitalTypeInfo.unit ? ` ${vitalTypeInfo.unit}` : '') : 
+            'N/A',
+          'Notes': vital.note || ''
+        };
+      });
+      
+      // Create worksheet and workbook
+      const worksheet = XLSX.utils.json_to_sheet(excelData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Vitals");
+      
+      // Generate filename with date range
+      const startDateStr = formatDateForAPI(exportDateRange.startDate);
+      const endDateStr = formatDateForAPI(exportDateRange.endDate);
+      const fileName = `health_vitals_${startDateStr}_to_${endDateStr}.xlsx`;
+      
+      // Export to file
+      XLSX.writeFile(workbook, fileName);
+      
+      toast.success("Excel file exported successfully");
+      setExportInProgress(false);
+      setShowExportModal(false);
+    } catch (error) {
+      console.error("Export error:", error);
+      toast.error("Failed to export data");
+      setExportInProgress(false);
+    }
+  };
 
   // Save or update vital entry
   const handleSubmit = async (e) => {
@@ -198,6 +366,24 @@ const Tracker = () => {
     return option ? option.label : typeId;
   };
 
+  // Reset export modal
+  const resetExportModal = () => {
+    setExportDateRange({
+      startDate: new Date(new Date().setDate(new Date().getDate() - 30)),
+      endDate: new Date()
+    });
+    setSelectedVitalTypes([]);
+    setShowExportModal(false);
+    setExportProgress(0);
+  };
+
+  // Initialize vital type selection when modal opens
+  useEffect(() => {
+    if (showExportModal && selectedVitalTypes.length === 0) {
+      setSelectedVitalTypes(vitalTypeOptions.map(option => option.id));
+    }
+  }, [showExportModal]);
+
   if (!token) {
     return (
       <div className="my-8 text-center py-10">
@@ -215,9 +401,42 @@ const Tracker = () => {
 
   return (
     <div className="my-8">
-      <h1 className="text-2xl font-semibold mb-6">Health Tracker</h1>
-      <VitalsChart vitalType="blood-pressure"></VitalsChart>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-semibold">Health Tracker</h1>
+        <button 
+          onClick={() => setShowExportModal(true)}
+          className="py-2 px-4 bg-green-600 text-white rounded font-medium hover:bg-green-700 transition-colors flex items-center"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          Export to Excel
+        </button>
+      </div>
+      
+      {/* Vital Chart Section with Type Selector */}
+      <div className="bg-white rounded-lg shadow p-6 mt-6">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="font-medium text-lg">Vital History</h2>
+          <div className="w-48">
+            <select
+              value={selectedVitalType}
+              onChange={handleVitalTypeChange}
+              className="w-full p-2 border rounded"
+            >
+              {vitalTypeOptions.map(option => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        
+        <VitalsChart vitalType={selectedVitalType} />
+      </div>
+      
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
         {/* Calendar Section */}
         <div className="md:col-span-1">
           <div className="bg-white rounded-lg shadow p-4 mb-4">
@@ -411,6 +630,107 @@ const Tracker = () => {
           </div>
         </div>
       </div>
+      
+      {/* Export Modal */}
+      {showExportModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h2 className="text-xl font-semibold mb-4">Export Vitals Data</h2>
+            
+            <div className="mb-4">
+              <label className="block text-gray-700 mb-2">Start Date</label>
+              <input 
+                type="date" 
+                name="startDate"
+                value={formatDateForAPI(exportDateRange.startDate)}
+                onChange={handleExportDateChange}
+                className="w-full p-2 border rounded"
+                max={formatDateForAPI(exportDateRange.endDate)}
+                disabled={exportInProgress}
+              />
+            </div>
+            
+            <div className="mb-6">
+              <label className="block text-gray-700 mb-2">End Date</label>
+              <input 
+                type="date" 
+                name="endDate"
+                value={formatDateForAPI(exportDateRange.endDate)}
+                onChange={handleExportDateChange}
+                className="w-full p-2 border rounded"
+                min={formatDateForAPI(exportDateRange.startDate)}
+                max={formatDateForAPI(new Date())}
+                disabled={exportInProgress}
+              />
+            </div>
+            
+            <div className="mb-6">
+              <div className="flex justify-between mb-2">
+                <label className="block text-gray-700">Select Vital Types</label>
+                <button 
+                  type="button" 
+                  onClick={toggleAllVitalTypes}
+                  className="text-sm text-primary hover:text-blue-700"
+                  disabled={exportInProgress}
+                >
+                  {selectedVitalTypes.length === vitalTypeOptions.length ? 'Deselect All' : 'Select All'}
+                </button>
+              </div>
+              
+              <div className="bg-gray-50 p-3 rounded border max-h-40 overflow-y-auto">
+                {vitalTypeOptions.map(option => (
+                  <div key={option.id} className="flex items-center mb-2 last:mb-0">
+                    <input
+                      type="checkbox"
+                      id={`export-${option.id}`}
+                      checked={selectedVitalTypes.includes(option.id)}
+                      onChange={() => toggleVitalTypeSelection(option.id)}
+                      className="mr-2 h-4 w-4"
+                      disabled={exportInProgress}
+                    />
+                    <label htmlFor={`export-${option.id}`} className="text-gray-700">
+                      {option.label}
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            {exportInProgress && (
+              <div className="mb-4">
+                <div className="flex justify-between mb-1">
+                  <span className="text-sm text-gray-600">Exporting data...</span>
+                  <span className="text-sm text-gray-600">{exportProgress}%</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2.5">
+                  <div 
+                    className="bg-blue-600 h-2.5 rounded-full" 
+                    style={{ width: `${exportProgress}%` }}
+                  ></div>
+                </div>
+              </div>
+            )}
+            
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={resetExportModal}
+                className="py-2 px-4 bg-gray-200 text-gray-700 rounded font-medium hover:bg-gray-300 transition-colors"
+                disabled={exportInProgress}
+              >
+                Cancel
+              </button>
+              
+              <button
+                onClick={exportToExcel}
+                className="py-2 px-4 bg-green-600 text-white rounded font-medium hover:bg-green-700 transition-colors"
+                disabled={exportInProgress || selectedVitalTypes.length === 0}
+              >
+                {exportInProgress ? 'Exporting...' : 'Export'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -10,7 +10,7 @@ const addVital = async (req, res) => {
             return res.json({ success: false, message: 'Missing required fields' });
         }
 
-        
+
         const vitalData = {
             userId,
             type,
@@ -127,7 +127,7 @@ const deleteVital = async (req, res) => {
 const getAllVitals = async (req, res) => {
     try {
       const userId = req.user.id;
-        console.log(userId);
+      
       const vitals = await vitalModel.find({ userId }).sort({ date: -1, time: -1 });
   
       res.json({ success: true, vitals });

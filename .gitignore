@@ -2,7 +2,12 @@
 **/.env
 # Ignore all .env files in the root directory
 /.env
-
+# Ignore .env file in /frontend directory
+/frontend/.env
+# Ignore .env file in /backend directory
+/backend/.env
+# Ignore .env files in the ./admin directory
+/admin/.env
 # Node modules (if you're using Node.js)
 **/node_modules/
 
