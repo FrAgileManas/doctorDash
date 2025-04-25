@@ -344,6 +344,82 @@ const verifyStripe = async (req, res) => {
     }
 
 }
+// API to add or update review to an appointment
+const addReview = async (req, res) => {
+    try {
+        const { userId, appointmentId, rating, comment } = req.body;
+        
+        if (!rating || !comment) {
+            return res.json({ success: false, message: 'Rating and comment are required' });
+        }
+        
+        // Validate rating
+        if (rating < 1 || rating > 5 || !Number.isInteger(Number(rating))) {
+            return res.json({ success: false, message: 'Rating must be an integer between 1 and 5' });
+        }
+        
+        const appointment = await appointmentModel.findById(appointmentId);
+        
+        // Check if appointment exists and belongs to the user
+        if (!appointment) {
+            return res.json({ success: false, message: 'Appointment not found' });
+        }
+        
+        if (appointment.userId !== userId) {
+            return res.json({ success: false, message: 'Unauthorized action' });
+        }
+        
+        // Check if appointment is completed
+        if (!appointment.isCompleted) {
+            return res.json({ success: false, message: 'Can only review completed appointments' });
+        }
+        
+        // Add or update review
+        await appointmentModel.findByIdAndUpdate(appointmentId, {
+            patientReview: { rating, comment, date: new Date() }
+        });
+        
+        res.json({ success: true, message: 'Review submitted successfully' });
+        
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
+    }
+};
+
+// API to delete a review
+const deleteReview = async (req, res) => {
+    try {
+        const { userId, appointmentId } = req.body;
+        
+        const appointment = await appointmentModel.findById(appointmentId);
+        
+        // Check if appointment exists and belongs to the user
+        if (!appointment) {
+            return res.json({ success: false, message: 'Appointment not found' });
+        }
+        
+        if (appointment.userId !== userId) {
+            return res.json({ success: false, message: 'Unauthorized action' });
+        }
+        
+        // Check if appointment has a review
+        if (!appointment.patientReview) {
+            return res.json({ success: false, message: 'No review found to delete' });
+        }
+        
+        // Remove the review by setting patientReview to undefined
+        await appointmentModel.findByIdAndUpdate(appointmentId, {
+            $unset: { patientReview: "" }
+        });
+        
+        res.json({ success: true, message: 'Review deleted successfully' });
+        
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
+    }
+};
 
 export {
     loginUser,
@@ -356,5 +432,7 @@ export {
     paymentRazorpay,
     verifyRazorpay,
     paymentStripe,
-    verifyStripe
+    verifyStripe,
+    addReview,
+    deleteReview
 }

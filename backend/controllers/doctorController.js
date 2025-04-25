@@ -174,13 +174,40 @@ const appointmentComplete = async (req, res) => {
 // API to get all doctors list for Frontend
 const doctorList = async (req, res) => {
     try {
-        const doctors = await doctorModel.find({}).select(['-password', '-email'])
-        res.json({ success: true, doctors })
+        const doctors = await doctorModel.find();
+        
+        // For each doctor, calculate their average rating
+        const doctorsWithRatings = await Promise.all(doctors.map(async (doctor) => {
+            const doctorObj = doctor.toObject();
+            
+            // Find all appointments with reviews for this doctor
+            const appointments = await appointmentModel.find({
+                docId: doctor._id.toString(),
+                isCompleted: true,
+                patientReview: { $exists: true }
+            });
+            
+            // Calculate average rating
+            if (appointments.length > 0) {
+                const totalRating = appointments.reduce((sum, appointment) => 
+                    sum + appointment.patientReview.rating, 0);
+                doctorObj.avgRating = totalRating / appointments.length;
+                doctorObj.reviewCount = appointments.length;
+            } else {
+                doctorObj.avgRating = 0;
+                doctorObj.reviewCount = 0;
+            }
+            
+            return doctorObj;
+        }));
+        
+        res.json({ success: true, doctors: doctorsWithRatings });
     } catch (error) {
-        console.log(error)
-        res.json({ success: false, message: error.message })
+        console.error(error);
+        res.json({ success: false, message: error.message });
     }
-}
+};
+
 
 // API to get doctor's patients with appointment status
 const doctorPatients = async (req, res) => {
@@ -306,40 +333,105 @@ const updateDoctorProfile = async (req, res) => {
 // API to get dashboard data for doctor panel
 const doctorDashboard = async (req, res) => {
     try {
-        const { docId } = req.body
+    const { docId } = req.body;
 
-        const appointments = await appointmentModel.find({ docId })
+    // Get all paid appointments
+    const paidAppointments = await appointmentModel.find({ docId, isCompleted: true });
 
-        let earnings = 0
+    // Total earnings
+    const earnings = paidAppointments.reduce((sum, appointment) => sum + appointment.amount, 0);
 
-        appointments.map((item) => {
-            if (item.isCompleted || item.payment) {
-                earnings += item.amount
-            }
-        })
+    // Count total paid appointments
+    const totalAppointments = await appointmentModel.countDocuments({ docId });
 
-        let patients = []
+    // Count unique patients
+    const uniquePatients = await appointmentModel.distinct('userId', { docId });
 
-        appointments.map((item) => {
-            if (!patients.includes(item.userId)) {
-                patients.push(item.userId)
-            }
-        })
+    // Latest paid appointments (limit to 10 for dashboard display)
+    const latestAppointments = await appointmentModel.find({ docId })
+        .sort({ date: -1 })
+        .limit(10);
 
-        const dashData = {
-            earnings,
-            appointments: appointments.length,
-            patients: patients.length,
-            latestAppointments: appointments.reverse()
-        }
+    // Get reviews from completed appointments that contain a review
+    const reviewsData = await appointmentModel.find({
+        docId,
+        isCompleted: true,
+        "patientReview.rating": { $exists: true }
+    });
 
-        res.json({ success: true, dashData })
-    } catch (error) {
-        console.log(error)
-        res.json({ success: false, message: error.message })
+    const reviewCount = reviewsData.length;
+    let avgRating = 0;
+
+    if (reviewCount > 0) {
+        const totalRating = reviewsData.reduce((sum, appointment) =>
+            sum + (appointment.patientReview?.rating || 0), 0);
+        avgRating = totalRating / reviewCount;
     }
+
+    const dashData = {
+        earnings,
+        appointments: totalAppointments,
+        patients: uniquePatients.length,
+        latestAppointments,
+        avgRating,
+        reviewCount
+    };
+
+    res.json({ success: true, dashData });
+
+} catch (error) {
+    console.error(error);
+    res.json({ success: false, message: error.message });
+}
 }
 
+const getMyReviews = async (req, res) => {
+    try {
+        const { docId } = req.body;
+        
+        const appointments = await appointmentModel.find({ 
+            docId, 
+            isCompleted: true,
+            patientReview: { $exists: true }
+        }).populate('userData');
+
+        const reviews = appointments.map(appointment => ({
+            rating: appointment.patientReview.rating,
+            comment: appointment.patientReview.comment,
+            date: appointment.patientReview.date,
+            userData: appointment.userData
+        }));
+
+        res.json({ success: true, reviews });
+    } catch (error) {
+        console.error(error);
+        res.json({ success: false, message: error.message });
+    }
+};
+
+const getDoctorReviews = async (req, res) => {
+    try {
+        const { doctorId } = req.params;
+        
+        const appointments = await appointmentModel.find({ 
+            docId: doctorId, 
+            isCompleted: true,
+            patientReview: { $exists: true }
+        }).populate('userData');
+
+        const reviews = appointments.map(appointment => ({
+            rating: appointment.patientReview.rating,
+            comment: appointment.patientReview.comment,
+            date: appointment.patientReview.date,
+            userData: appointment.userData
+        }));
+
+        res.json({ success: true, reviews });
+    } catch (error) {
+        console.error(error);
+        res.json({ success: false, message: error.message });
+    }
+};
 export {
     loginDoctor,
     appointmentsDoctor,
@@ -354,5 +446,7 @@ export {
     patientVitals,
     patientAppointments,
     getUploadPresignedUrl,
-    savePrescription
+    savePrescription,
+    getMyReviews,
+    getDoctorReviews
 }

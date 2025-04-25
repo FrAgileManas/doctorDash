@@ -13,7 +13,9 @@ import {
     patientVitals,
     patientAppointments,
     getUploadPresignedUrl,
-    savePrescription
+    savePrescription,
+    getDoctorReviews,
+    getMyReviews
 } from '../controllers/doctorController.js';
 import authDoctor from '../middleware/authDoctor.js';
 const doctorRouter = express.Router();
@@ -27,6 +29,10 @@ doctorRouter.post("/complete-appointment", authDoctor, appointmentComplete);
 doctorRouter.get("/dashboard", authDoctor, doctorDashboard);
 doctorRouter.get("/profile", authDoctor, doctorProfile);
 doctorRouter.post("/update-profile", authDoctor, updateDoctorProfile);
+
+// Review endpoints
+doctorRouter.get("/reviews/:doctorId", getDoctorReviews); // Public endpoint
+doctorRouter.get("/my-reviews", authDoctor, getMyReviews); // Auth-protected endpoint
 
 // New routes for patient functionality
 doctorRouter.get("/patients", authDoctor, doctorPatients);

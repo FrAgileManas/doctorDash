@@ -7,7 +7,6 @@ import axios from 'axios'
 import { toast } from 'react-toastify'
 
 const Appointment = () => {
-
     const { docId } = useParams()
     const { doctors, currencySymbol, backendUrl, token, getDoctosData } = useContext(AppContext)
     const daysOfWeek = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']
@@ -16,6 +15,8 @@ const Appointment = () => {
     const [docSlots, setDocSlots] = useState([])
     const [slotIndex, setSlotIndex] = useState(0)
     const [slotTime, setSlotTime] = useState('')
+    const [reviews, setReviews] = useState([])
+    const [loading, setLoading] = useState(false)
 
     const navigate = useNavigate()
 
@@ -24,8 +25,21 @@ const Appointment = () => {
         setDocInfo(docInfo)
     }
 
-    const getAvailableSolts = async () => {
+    const fetchDoctorReviews = async () => {
+        setLoading(true)
+        try {
+            const { data } = await axios.get(`${backendUrl}/api/doctor/reviews/${docId}`)
+            if (data.success) {
+                setReviews(data.reviews)
+            }
+        } catch (error) {
+            console.log(error)
+        } finally {
+            setLoading(false)
+        }
+    }
 
+    const getAvailableSolts = async () => {
         setDocSlots([])
 
         // getting current date
@@ -53,7 +67,6 @@ const Appointment = () => {
 
             let timeSlots = [];
 
-
             while (currentDate < endTime) {
                 let formattedTime = currentDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -67,7 +80,6 @@ const Appointment = () => {
                 const isSlotAvailable = docInfo.slots_booked[slotDate] && docInfo.slots_booked[slotDate].includes(slotTime) ? false : true
 
                 if (isSlotAvailable) {
-
                     // Add slot to array
                     timeSlots.push({
                         datetime: new Date(currentDate),
@@ -80,13 +92,10 @@ const Appointment = () => {
             }
 
             setDocSlots(prev => ([...prev, timeSlots]))
-
         }
-
     }
 
     const bookAppointment = async () => {
-
         if (!token) {
             toast.warning('Login to book appointment')
             return navigate('/login')
@@ -101,7 +110,6 @@ const Appointment = () => {
         const slotDate = day + "_" + month + "_" + year
 
         try {
-
             const { data } = await axios.post(backendUrl + '/api/user/book-appointment', { docId, slotDate, slotTime }, { headers: { token } })
             if (data.success) {
                 toast.success(data.message)
@@ -110,12 +118,41 @@ const Appointment = () => {
             } else {
                 toast.error(data.message)
             }
-
         } catch (error) {
             console.log(error)
             toast.error(error.message)
         }
+    }
 
+    // Helper function to render star rating
+    const renderStars = (rating) => {
+        const stars = []
+        for (let i = 1; i <= 5; i++) {
+            if (i <= Math.floor(rating)) {
+                // Full star
+                stars.push(<span key={i} className="text-yellow-400">★</span>)
+            } else if (i === Math.ceil(rating) && !Number.isInteger(rating)) {
+                // Half star
+                stars.push(<span key={i} className="text-yellow-400">★</span>)
+            } else {
+                // Empty star
+                stars.push(<span key={i} className="text-gray-300">★</span>)
+            }
+        }
+        return stars
+    }
+
+    // Format date for review display
+    const formatReviewDate = (dateString) => {
+        const date = new Date(dateString)
+        return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+    }
+
+    // Calculate average rating
+    const calculateAverageRating = () => {
+        if (!reviews || reviews.length === 0) return 0
+        const sum = reviews.reduce((acc, review) => acc + review.rating, 0)
+        return sum / reviews.length
     }
 
     useEffect(() => {
@@ -127,12 +164,12 @@ const Appointment = () => {
     useEffect(() => {
         if (docInfo) {
             getAvailableSolts()
+            fetchDoctorReviews()
         }
     }, [docInfo])
 
     return docInfo ? (
         <div>
-
             {/* ---------- Doctor Details ----------- */}
             <div className='flex flex-col sm:flex-row gap-4'>
                 <div>
@@ -140,13 +177,24 @@ const Appointment = () => {
                 </div>
 
                 <div className='flex-1 border border-[#ADADAD] rounded-lg p-8 py-7 bg-white mx-2 sm:mx-0 mt-[-80px] sm:mt-0'>
-
                     {/* ----- Doc Info : name, degree, experience ----- */}
-
                     <p className='flex items-center gap-2 text-3xl font-medium text-gray-700'>{docInfo.name} <img className='w-5' src={assets.verified_icon} alt="" /></p>
                     <div className='flex items-center gap-2 mt-1 text-gray-600'>
                         <p>{docInfo.degree} - {docInfo.speciality}</p>
                         <button className='py-0.5 px-2 border text-xs rounded-full'>{docInfo.experience}</button>
+                    </div>
+
+                    {/* Rating summary */}
+                    <div className='flex items-center mt-3'>
+                        <div className='flex text-xl mr-2'>
+                            {renderStars(calculateAverageRating())}
+                        </div>
+                        <span className='text-gray-700 font-medium'>
+                            {calculateAverageRating().toFixed(1)}
+                        </span>
+                        <span className='text-gray-500 ml-1'>
+                            ({reviews.length} {reviews.length === 1 ? 'review' : 'reviews'})
+                        </span>
                     </div>
 
                     {/* ----- Doc About ----- */}
@@ -161,7 +209,7 @@ const Appointment = () => {
 
             {/* Booking slots */}
             <div className='sm:ml-72 sm:pl-4 mt-8 font-medium text-[#565656]'>
-                <p >Booking slots</p>
+                <p>Booking slots</p>
                 <div className='flex gap-3 items-center w-full overflow-x-scroll mt-4'>
                     {docSlots.length && docSlots.map((item, index) => (
                         <div onClick={() => setSlotIndex(index)} key={index} className={`text-center py-6 min-w-16 rounded-full cursor-pointer ${slotIndex === index ? 'bg-primary text-white' : 'border border-[#DDDDDD]'}`}>
@@ -180,7 +228,42 @@ const Appointment = () => {
                 <button onClick={bookAppointment} className='bg-primary text-white text-sm font-light px-20 py-3 rounded-full my-6'>Book an appointment</button>
             </div>
 
-            {/* Listing Releated Doctors */}
+            {/* Patient Reviews Section */}
+            <div className='mt-10 mb-12'>
+                <h3 className='text-xl font-medium text-gray-700 mb-4'>Patient Reviews</h3>
+                
+                {loading ? (
+                    <p className='text-gray-500'>Loading reviews...</p>
+                ) : reviews.length > 0 ? (
+                    <div className='space-y-6'>
+                        {reviews.map((review, index) => (
+                            <div key={index} className='border border-gray-200 rounded-lg p-4 bg-white'>
+                                <div className='flex items-start'>
+                                    <img 
+                                        src={review.userData.image || assets.user_placeholder} 
+                                        alt={review.userData.name} 
+                                        className='w-12 h-12 rounded-full mr-4'
+                                    />
+                                    <div className='flex-1'>
+                                        <div className='flex items-center justify-between'>
+                                            <p className='font-medium text-gray-800'>{review.userData.name}</p>
+                                            <p className='text-sm text-gray-500'>{formatReviewDate(review.date)}</p>
+                                        </div>
+                                        <div className='flex mt-1'>
+                                            {renderStars(review.rating)}
+                                        </div>
+                                        <p className='mt-2 text-gray-600'>{review.comment}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    <p className='text-gray-500'>No reviews yet.</p>
+                )}
+            </div>
+
+            {/* Listing Related Doctors */}
             <RelatedDoctors speciality={docInfo.speciality} docId={docId} />
         </div>
     ) : null

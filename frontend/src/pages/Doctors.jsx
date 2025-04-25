@@ -1,15 +1,13 @@
 import React, { useContext, useEffect, useState } from 'react'
 import { AppContext } from '../context/AppContext'
 import { useNavigate, useParams } from 'react-router-dom'
+import { assets } from '../assets/assets' // Add this if you have star icons in assets
 
 const Doctors = () => {
-
   const { speciality } = useParams()
-
   const [filterDoc, setFilterDoc] = useState([])
   const [showFilter, setShowFilter] = useState(false)
   const navigate = useNavigate();
-
   const { doctors } = useContext(AppContext)
 
   const applyFilter = () => {
@@ -18,6 +16,24 @@ const Doctors = () => {
     } else {
       setFilterDoc(doctors)
     }
+  }
+
+  // Helper function to render star rating
+  const renderStars = (rating) => {
+    const stars = []
+    for (let i = 1; i <= 5; i++) {
+      if (i <= Math.floor(rating)) {
+        // Full star
+        stars.push(<span key={i} className="text-yellow-400">★</span>)
+      } else if (i === Math.ceil(rating) && !Number.isInteger(rating)) {
+        // Half star
+        stars.push(<span key={i} className="text-yellow-400">★</span>)
+      } else {
+        // Empty star
+        stars.push(<span key={i} className="text-gray-300">★</span>)
+      }
+    }
+    return stars
   }
 
   useEffect(() => {
@@ -43,10 +59,21 @@ const Doctors = () => {
               <img className='bg-[#EAEFFF]' src={item.image} alt="" />
               <div className='p-4'>
                 <div className={`flex items-center gap-2 text-sm text-center ${item.available ? 'text-green-500' : "text-gray-500"}`}>
-                  <p className={`w-2 h-2 rounded-full ${item.available ? 'bg-green-500' : "bg-gray-500"}`}></p><p>{item.available ? 'Available' : "Not Available"}</p>
+                  <p className={`w-2 h-2 rounded-full ${item.available ? 'bg-green-500' : "bg-gray-500"}`}></p>
+                  <p>{item.available ? 'Available' : "Not Available"}</p>
                 </div>
                 <p className='text-[#262626] text-lg font-medium'>{item.name}</p>
                 <p className='text-[#5C5C5C] text-sm'>{item.speciality}</p>
+                {/* Display average rating */}
+                <div className='flex items-center mt-2'>
+                  <div className='flex mr-2'>
+                    {renderStars(item.avgRating || 0)}
+                  </div>
+                  <span className='text-sm text-gray-500'>
+                    {item.avgRating ? item.avgRating.toFixed(1) : "No ratings"} 
+                    {item.reviewCount > 0 && ` (${item.reviewCount})`}
+                  </span>
+                </div>
               </div>
             </div>
           ))}
