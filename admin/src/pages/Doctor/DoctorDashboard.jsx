@@ -1,23 +1,141 @@
 import React from 'react'
 import { useContext } from 'react'
-import { useEffect, useState } from 'react'
+import { useEffect, useState,useRef } from 'react'
 import { DoctorContext } from '../../context/DoctorContext'
 import { assets } from '../../assets/assets'
 import { AppContext } from '../../context/AppContext'
 import axios from 'axios'
+import { toast } from 'react-toastify'
 
 const DoctorDashboard = () => {
-  const { dToken, dashData, getDashData, cancelAppointment, completeAppointment } = useContext(DoctorContext)
+  const { dToken, dashData, getDashData, cancelAppointment, completeAppointment, getAppointments } = useContext(DoctorContext)
   const { slotDateFormat, currency, backendUrl } = useContext(AppContext)
   const [reviews, setReviews] = useState([])
   const [loading, setLoading] = useState(false)
-
+  const fileInputRef = useRef(null)
+  const [uploadingPrescription, setUploadingPrescription] = useState(null)
   useEffect(() => {
     if (dToken) {
       getDashData()
       fetchDoctorReviews()
     }
   }, [dToken])
+
+
+
+  const handleFileChange = async (e, appointmentId) => {
+    const file = e.target.files[0]
+    if (!file) return
+
+    // Check file type (PDF, JPG, PNG only)
+    const validTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png']
+    // console.log('File type:', file.type, 'File size:', file.size, typeof(file.type))
+    if (!validTypes.includes(file.type)) {
+      toast.error('Please upload a PDF, JPG, or PNG file only')
+      return
+    }
+
+    // Check file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('File size should be less than 5MB')
+      return
+    }
+
+    await uploadPrescriptionToR2(file, appointmentId)
+  }
+
+  // Function to get a presigned URL and upload file to R2
+  const uploadPrescriptionToR2 = async (file, appointmentId) => {
+    try {
+      setUploadingPrescription(appointmentId)
+      
+      // Generate a unique filename with timestamp and original extension
+      const fileExtension = file.name.split('.').pop()
+      const timestamp = new Date().getTime()
+      const uniqueFilename = `prescriptions/${appointmentId}-${timestamp}.${fileExtension}`
+      
+      // Step 1: Get a presigned URL from your backend
+      const response = await axios.post(
+        `${backendUrl}/api/doctor/get-upload-url`,
+        { 
+          filename: uniqueFilename,
+          contentType: file.type,
+          // Add the docId from the token (it should be extracted in the authDoctor middleware)
+        },
+        { headers: { dToken } }
+      )
+      
+      const presignedData = response.data;
+      console.log('Presigned URL response:', presignedData)
+      if (!presignedData || !presignedData.success || !presignedData.uploadUrl) {
+        console.error('Failed to get upload URL:', presignedData);
+        throw new Error('Failed to get upload URL')
+      }
+      
+      // Step 2: Upload the file directly to R2 using the presigned URL
+      // await axios.put(
+      //   presignedData.uploadUrl,
+      //   file,
+      //   { 
+      //     headers: { 
+      //       'Content-Type': file.type,
+      //     },
+      //   }
+      // )
+      await fetch(presignedData.uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': file.type,
+        },
+        body: file,
+      });
+      
+      // Step 3: Save the reference in your database
+      await savePrescriptionReference(appointmentId, presignedData.fileUrl, presignedData.key)
+      
+    } catch (error) {
+      console.error('Upload error:', error)
+      toast.error(error.response?.data?.message || 'Failed to upload prescription')
+    } finally {
+      setUploadingPrescription(null)
+    }
+  }
+
+  // Function to save the R2 file reference to your backend
+  const savePrescriptionReference = async (appointmentId, fileUrl, storageKey) => {
+    try {
+      const { data } = await axios.post(
+        `${backendUrl}/api/doctor/save-prescription`, 
+        { 
+          appointmentId,
+          prescriptionUrl: fileUrl,
+          storageKey
+        },
+        { headers: { dToken } }
+      )
+      
+      if (data.success) {
+        toast.success('Prescription uploaded successfully')
+        completeAppointment(appointmentId) // Mark appointment as completed
+        getAppointments() // Refresh appointments list
+      } else {
+        toast.error(data.message || 'Failed to save prescription')
+      }
+    } catch (error) {
+      console.error('Save reference error:', error)
+      toast.error(error.response?.data?.message || 'Failed to save prescription reference')
+    }
+  }
+
+  // Function to handle upload button click
+  const handleUploadClick = (appointmentId) => {
+    if (fileInputRef.current) {
+      fileInputRef.current.setAttribute('data-appointment-id', appointmentId)
+      fileInputRef.current.click()
+    }
+  }
+
+
 
   const fetchDoctorReviews = async () => {
     setLoading(true)
@@ -121,7 +239,7 @@ const DoctorDashboard = () => {
                   ? <p className='text-green-500 text-xs font-medium'>Completed</p>
                   : <div className='flex'>
                     <img onClick={() => cancelAppointment(item._id)} className='w-10 cursor-pointer' src={assets.cancel_icon} alt="" />
-                    <img onClick={() => completeAppointment(item._id)} className='w-10 cursor-pointer' src={assets.tick_icon} alt="" />
+                    <img onClick={() => handleUploadClick(item._id)} className='w-10 cursor-pointer' src={assets.tick_icon} alt="" />
                   </div>
               }
             </div>
@@ -169,6 +287,19 @@ const DoctorDashboard = () => {
           )}
         </div>
       </div>
+      <input
+        type="file"
+        ref={fileInputRef}
+        className="hidden"
+        accept="application/pdf,image/jpeg,image/jpg,image/png"
+        onChange={(e) => {
+          const appointmentId = e.target.getAttribute('data-appointment-id')
+          if (appointmentId) {
+            handleFileChange(e, appointmentId)
+          }
+          e.target.value = null // Reset input
+        }}
+      />
     </div>
   )
 }

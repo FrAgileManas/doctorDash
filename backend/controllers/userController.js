@@ -5,15 +5,38 @@ import userModel from "../models/userModel.js";
 import doctorModel from "../models/doctorModel.js";
 import appointmentModel from "../models/appointmentModel.js";
 import { v2 as cloudinary } from 'cloudinary'
-import stripe from "stripe";
-import razorpay from 'razorpay';
+import razorpayInstance from "../config/razorpay.js";
+// Import the required module at the top of userController.js
+import { EmailClient } from '@azure/communication-email';
+import emailTemplates from "../models/emailTemplates.js";
+// Create email client instance
+const COMMUNICATION_SERVICES_CONNECTION_STRING = process.env.COMMUNICATION_SERVICES_CONNECTION_STRING;
+const emailClient = new EmailClient(COMMUNICATION_SERVICES_CONNECTION_STRING);
 
-// Gateway Initialize
-const stripeInstance = new stripe(process.env.STRIPE_SECRET_KEY)
-const razorpayInstance = new razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID,
-    key_secret: process.env.RAZORPAY_KEY_SECRET,
-})
+// Reusable email notification function
+async function sendNotificationEmail(userEmail, subject, htmlContent) {
+  try {
+    const emailMessage = {
+      senderAddress: "DoNotReply@d718c6b6-e8fb-4927-9631-85ded959af50.azurecomm.net",
+      content: {
+        subject: subject,
+        html: htmlContent,
+      },
+      recipients: {
+        to: [{ address: userEmail }],
+      },
+    };
+
+    const poller = await emailClient.beginSend(emailMessage);
+    const result = await poller.pollUntilDone();
+    console.log("Email notification sent successfully");
+    return result;
+  } catch (error) {
+    console.error("Error sending email notification:", error);
+    // Note: We're catching the error here to prevent it from affecting the main operation
+    // if email sending fails
+  }
+}
 
 // API to register user
 const registerUser = async (req, res) => {
@@ -190,35 +213,41 @@ const bookAppointment = async (req, res) => {
 // API to cancel appointment
 const cancelAppointment = async (req, res) => {
     try {
-
-        const { userId, appointmentId } = req.body
-        const appointmentData = await appointmentModel.findById(appointmentId)
+        const { userId, appointmentId } = req.body;
+        const appointmentData = await appointmentModel.findById(appointmentId);
 
         // verify appointment user 
         if (appointmentData.userId !== userId) {
-            return res.json({ success: false, message: 'Unauthorized action' })
+            return res.json({ success: false, message: 'Unauthorized action' });
         }
 
-        await appointmentModel.findByIdAndUpdate(appointmentId, { cancelled: true })
+        await appointmentModel.findByIdAndUpdate(appointmentId, { cancelled: true });
 
         // releasing doctor slot 
-        const { docId, slotDate, slotTime } = appointmentData
+        const { docId, slotDate, slotTime } = appointmentData;
 
-        const doctorData = await doctorModel.findById(docId)
+        const doctorData = await doctorModel.findById(docId);
+        const userData = await userModel.findById(userId).select("-password");
 
-        let slots_booked = doctorData.slots_booked
+        let slots_booked = doctorData.slots_booked;
 
-        slots_booked[slotDate] = slots_booked[slotDate].filter(e => e !== slotTime)
+        slots_booked[slotDate] = slots_booked[slotDate].filter(e => e !== slotTime);
 
-        await doctorModel.findByIdAndUpdate(docId, { slots_booked })
+        await doctorModel.findByIdAndUpdate(docId, { slots_booked });
 
-        res.json({ success: true, message: 'Appointment Cancelled' })
+        // Send cancellation email
+        if (userData.email) {
+            const emailHtml = emailTemplates.appointmentCancellation(userData, appointmentData, 'user');
+            sendNotificationEmail(userData.email, "Appointment Cancellation - DoctorDash", emailHtml);
+        }
+
+        res.json({ success: true, message: 'Appointment Cancelled' });
 
     } catch (error) {
-        console.log(error)
-        res.json({ success: false, message: error.message })
+        console.log(error);
+        res.json({ success: false, message: error.message });
     }
-}
+};
 
 // API to get user appointments for frontend my-appointments page
 const listAppointment = async (req, res) => {
@@ -235,115 +264,58 @@ const listAppointment = async (req, res) => {
     }
 }
 
-// API to make payment of appointment using razorpay
 const paymentRazorpay = async (req, res) => {
     try {
-
-        const { appointmentId } = req.body
-        const appointmentData = await appointmentModel.findById(appointmentId)
-
-        if (!appointmentData || appointmentData.cancelled) {
-            return res.json({ success: false, message: 'Appointment Cancelled or not found' })
+        const { holdId, docId } = req.body;
+        
+        // Verify holdId
+        let decodedData;
+        try {
+            decodedData = jwt.verify(holdId, process.env.JWT_SECRET);
+        } catch (err) {
+            return res.json({ success: false, message: 'Hold has expired' });
         }
-
+        
+        const docData = await doctorModel.findById(docId);
+        
         // creating options for razorpay payment
         const options = {
-            amount: appointmentData.amount * 100,
+            amount: docData.fees * 100,
             currency: process.env.CURRENCY,
-            receipt: appointmentId,
-        }
+        };
 
         // creation of an order
-        const order = await razorpayInstance.orders.create(options)
+        const order = await razorpayInstance.orders.create(options);
         if (!order) {
-            return res.json({ success: false, message: 'Something went wrong' })
+            return res.json({ success: false, message: 'Something went wrong' });
         }
-        res.json({ success: true, order })
+        res.json({ success: true, order });
 
     } catch (error) {
-        console.log(error)
-        res.json({ success: false, message: error.message })
+        console.log(error);
+        res.json({ success: false, message: error.message });
     }
-}
+};
 
 // API to verify payment of razorpay
 const verifyRazorpay = async (req, res) => {
     try {
-        const { razorpay_order_id } = req.body
-        const orderInfo = await razorpayInstance.orders.fetch(razorpay_order_id)
+        const { razorpay_order_id, holdId } = req.body;
+        const orderInfo = await razorpayInstance.orders.fetch(razorpay_order_id);
 
         if (orderInfo.status === 'paid') {
-            await appointmentModel.findByIdAndUpdate(orderInfo.receipt, { payment: true })
-            res.json({ success: true, message: "Payment Successful" })
+            res.json({ success: true, message: "Payment Successful" });
         }
         else {
-            res.json({ success: false, message: 'Payment Failed' })
+            res.json({ success: false, message: 'Payment Failed' });
         }
     } catch (error) {
-        console.log(error)
-        res.json({ success: false, message: error.message })
+        console.log(error);
+        res.json({ success: false, message: error.message });
     }
-}
+};
 
-// API to make payment of appointment using Stripe
-const paymentStripe = async (req, res) => {
-    try {
 
-        const { appointmentId } = req.body
-        const { origin } = req.headers
-
-        const appointmentData = await appointmentModel.findById(appointmentId)
-
-        if (!appointmentData || appointmentData.cancelled) {
-            return res.json({ success: false, message: 'Appointment Cancelled or not found' })
-        }
-
-        const currency = process.env.CURRENCY.toLocaleLowerCase()
-
-        const line_items = [{
-            price_data: {
-                currency,
-                product_data: {
-                    name: "Appointment Fees"
-                },
-                unit_amount: appointmentData.amount * 100
-            },
-            quantity: 1
-        }]
-
-        const session = await stripeInstance.checkout.sessions.create({
-            success_url: `${origin}/verify?success=true&appointmentId=${appointmentData._id}`,
-            cancel_url: `${origin}/verify?success=false&appointmentId=${appointmentData._id}`,
-            line_items: line_items,
-            mode: 'payment',
-        })
-
-        res.json({ success: true, session_url: session.url });
-
-    } catch (error) {
-        console.log(error)
-        res.json({ success: false, message: error.message })
-    }
-}
-
-const verifyStripe = async (req, res) => {
-    try {
-
-        const { appointmentId, success } = req.body
-
-        if (success === "true") {
-            await appointmentModel.findByIdAndUpdate(appointmentId, { payment: true })
-            return res.json({ success: true, message: 'Payment Successful' })
-        }
-
-        res.json({ success: false, message: 'Payment Failed' })
-
-    } catch (error) {
-        console.log(error)
-        res.json({ success: false, message: error.message })
-    }
-
-}
 // API to add or update review to an appointment
 const addReview = async (req, res) => {
     try {
@@ -420,7 +392,236 @@ const deleteReview = async (req, res) => {
         res.json({ success: false, message: error.message });
     }
 };
+// API to temporarily hold a slot for payment
+const holdSlot = async (req, res) => {
+    try {
+        const { userId, docId, slotDate, slotTime } = req.body;
+        const docData = await doctorModel.findById(docId).select("-password");
 
+        if (!docData.available) {
+            return res.json({ success: false, message: 'Doctor Not Available' });
+        }
+
+        let slots_booked = docData.slots_booked;
+        let slots_on_hold = docData.slots_on_hold || {};
+
+        // Check if slot is already booked
+        if (slots_booked[slotDate] && slots_booked[slotDate].includes(slotTime)) {
+            return res.json({ success: false, message: 'Slot Not Available' });
+        }
+
+        // Check if slot is already on hold
+        if (slots_on_hold[slotDate] && slots_on_hold[slotDate][slotTime]) {
+            const holdTime = slots_on_hold[slotDate][slotTime].timestamp;
+            // Check if hold has expired (15 minutes)
+            if (Date.now() - holdTime < 15 * 60 * 1000) {
+                return res.json({ success: false, message: 'Slot is currently unavailable' });
+            }
+        }
+
+        // Hold the slot
+        if (!slots_on_hold[slotDate]) {
+            slots_on_hold[slotDate] = {};
+        }
+        
+        slots_on_hold[slotDate][slotTime] = {
+            userId,
+            timestamp: Date.now()
+        };
+
+        // Update doctor with held slot
+        await doctorModel.findByIdAndUpdate(docId, { slots_on_hold });
+
+        // Generate a hold ID
+        const holdId = jwt.sign(
+            { userId, docId, slotDate, slotTime }, 
+            process.env.JWT_SECRET,
+            { expiresIn: '15m' }
+        );
+
+        res.json({ 
+            success: true, 
+            message: 'Slot held successfully', 
+            holdId 
+        });
+
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
+    }
+};
+
+
+// API to finalize booking after payment
+const finalizeBooking = async (req, res) => {
+    try {
+        const { holdId, razorpay_payment_id } = req.body;
+        
+        // Verify and decode holdId
+        let decodedData;
+        try {
+            decodedData = jwt.verify(holdId, process.env.JWT_SECRET);
+        } catch (err) {
+            return res.json({ success: false, message: 'Hold has expired' });
+        }
+        
+        const { userId, docId, slotDate, slotTime } = decodedData;
+        const docData = await doctorModel.findById(docId).select("-password");
+        
+        // Verify the hold still exists
+        const slots_on_hold = docData.slots_on_hold || {};
+        if (!slots_on_hold[slotDate] || 
+            !slots_on_hold[slotDate][slotTime] || 
+            slots_on_hold[slotDate][slotTime].userId !== userId) {
+            return res.json({ success: false, message: 'Hold no longer valid' });
+        }
+        
+        // Move from hold to booked
+        let slots_booked = docData.slots_booked;
+        
+        if (slots_booked[slotDate]) {
+            slots_booked[slotDate].push(slotTime);
+        } else {
+            slots_booked[slotDate] = [slotTime];
+        }
+        
+        // Remove from hold
+        delete slots_on_hold[slotDate][slotTime];
+        if (Object.keys(slots_on_hold[slotDate]).length === 0) {
+            delete slots_on_hold[slotDate];
+        }
+        
+        const userData = await userModel.findById(userId).select("-password");
+        
+        const appointmentData = {
+            userId,
+            docId,
+            userData,
+            docData: {
+                _id: docData._id,
+                name: docData.name,
+                image: docData.image,
+                speciality: docData.speciality,
+                fees: docData.fees,
+                degree: docData.degree,
+                experience: docData.experience
+            },
+            amount: docData.fees,
+            slotTime,
+            slotDate,
+            date: Date.now(),
+            payment: true,
+            transactionId: razorpay_payment_id
+        };
+        
+        const newAppointment = new appointmentModel(appointmentData);
+        const savedAppointment = await newAppointment.save();
+        
+        // Update doctor data
+        await doctorModel.findByIdAndUpdate(docId, { 
+            slots_booked,
+            slots_on_hold
+        });
+        
+        // Send confirmation email
+        if (userData.email) {
+            const emailHtml = emailTemplates.appointmentConfirmation(userData, appointmentData, razorpay_payment_id);
+            sendNotificationEmail(userData.email, "Appointment Confirmation - DoctorDash", emailHtml);
+        }
+        
+        res.json({ 
+            success: true, 
+            message: 'Appointment Booked Successfully', 
+            appointmentId: savedAppointment._id 
+        });
+        
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
+    }
+};
+
+// API to resend appointment confirmation email
+const resendConfirmationEmail = async (req, res) => {
+    try {
+        const { userId, appointmentId } = req.body;
+        
+        // Find the appointment
+        const appointment = await appointmentModel.findById(appointmentId);
+        
+        // Check if appointment exists and belongs to the user
+        if (!appointment) {
+            return res.json({ success: false, message: 'Appointment not found' });
+        }
+        
+        if (appointment.userId !== userId) {
+            return res.json({ success: false, message: 'Unauthorized action' });
+        }
+        
+        // Get user data
+        const userData = await userModel.findById(userId).select("-password");
+        
+        if (!userData || !userData.email) {
+            return res.json({ success: false, message: 'User email not found' });
+        }
+        
+        // Generate and send the email
+        const emailHtml = emailTemplates.appointmentConfirmation(
+            userData, 
+            appointment, 
+            appointment.transactionId || null
+        );
+        
+        await sendNotificationEmail(
+            userData.email, 
+            "Appointment Confirmation - DoctorDash", 
+            emailHtml
+        );
+        
+        res.json({ success: true, message: 'Confirmation email resent successfully' });
+        
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
+    }
+};
+
+// API to release a held slot
+const releaseHeldSlot = async (req, res) => {
+    try {
+        const { holdId } = req.body;
+        
+        // Verify and decode holdId
+        let decodedData;
+        try {
+            decodedData = jwt.verify(holdId, process.env.JWT_SECRET);
+        } catch (err) {
+            return res.json({ success: true, message: 'Hold already expired' });
+        }
+        
+        const { docId, slotDate, slotTime } = decodedData;
+        const docData = await doctorModel.findById(docId);
+        
+        const slots_on_hold = docData.slots_on_hold || {};
+        
+        // Remove from hold if exists
+        if (slots_on_hold[slotDate] && slots_on_hold[slotDate][slotTime]) {
+            delete slots_on_hold[slotDate][slotTime];
+            
+            if (Object.keys(slots_on_hold[slotDate]).length === 0) {
+                delete slots_on_hold[slotDate];
+            }
+            
+            await doctorModel.findByIdAndUpdate(docId, { slots_on_hold });
+        }
+        
+        res.json({ success: true, message: 'Slot released successfully' });
+        
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
+    }
+};
 export {
     loginUser,
     registerUser,
@@ -431,8 +632,11 @@ export {
     cancelAppointment,
     paymentRazorpay,
     verifyRazorpay,
-    paymentStripe,
-    verifyStripe,
     addReview,
-    deleteReview
+    deleteReview,
+    holdSlot,
+    finalizeBooking,
+    releaseHeldSlot,
+    resendConfirmationEmail,
+    sendNotificationEmail,
 }

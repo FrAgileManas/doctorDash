@@ -7,7 +7,8 @@ import crypto from 'crypto';
 import { S3 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
-
+import { EmailClient } from '@azure/communication-email';
+import userModel from "../models/userModel.js";
 
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
 const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
@@ -24,6 +25,105 @@ const s3Client = new S3({
     secretAccessKey: R2_SECRET_ACCESS_KEY,
   },
 });
+
+// Create email client instance
+const COMMUNICATION_SERVICES_CONNECTION_STRING = process.env.COMMUNICATION_SERVICES_CONNECTION_STRING;
+const emailClient = new EmailClient(COMMUNICATION_SERVICES_CONNECTION_STRING);
+
+// Add this function to doctorController.js
+async function sendNotificationEmail(userEmail, subject, htmlContent) {
+  try {
+    const emailMessage = {
+      senderAddress: "DoNotReply@d718c6b6-e8fb-4927-9631-85ded959af50.azurecomm.net",
+      content: {
+        subject: subject,
+        html: htmlContent,
+      },
+      recipients: {
+        to: [{ address: userEmail }],
+      },
+    };
+
+    const poller = await emailClient.beginSend(emailMessage);
+    const result = await poller.pollUntilDone();
+    console.log("Email notification sent successfully");
+    return result;
+  } catch (error) {
+    console.error("Error sending email notification:", error);
+  }
+}
+
+// Add the doctor cancellation email template
+const doctorCancellationTemplate = (userData, appointmentData) => `
+  <html lang="en">
+  <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Appointment Cancelled by Doctor</title>
+      <style>
+          body {
+              font-family: Arial, sans-serif;
+              line-height: 1.6;
+              color: #333;
+              max-width: 600px;
+              margin: 0 auto;
+              padding: 20px;
+          }
+          .header {
+              background-color: #ff6347;
+              color: white;
+              padding: 20px;
+              text-align: center;
+              border-radius: 5px 5px 0 0;
+          }
+          .content {
+              padding: 20px;
+              border: 1px solid #ddd;
+              border-top: none;
+              border-radius: 0 0 5px 5px;
+          }
+          .details {
+              margin: 20px 0;
+              padding: 15px;
+              background-color: #f9f9f9;
+              border-radius: 5px;
+          }
+          .footer {
+              margin-top: 20px;
+              text-align: center;
+              font-size: 12px;
+              color: #777;
+          }
+      </style>
+  </head>
+  <body>
+      <div class="header">
+          <h1>Appointment Cancelled by Doctor</h1>
+      </div>
+      <div class="content">
+          <p>Dear ${userData.name},</p>
+          <p>We regret to inform you that your appointment with Dr. ${appointmentData.docData.name} has been cancelled by the doctor.</p>
+          
+          <div class="details">
+              <p><strong>Date:</strong> ${appointmentData.slotDate}</p>
+              <p><strong>Time:</strong> ${appointmentData.slotTime}</p>
+              <p><strong>Doctor:</strong> Dr. ${appointmentData.docData.name} (${appointmentData.docData.speciality})</p>
+          </div>
+          
+          <p>We apologize for any inconvenience this may cause. The doctor might have had an emergency or other unavoidable circumstance.</p>
+          
+          <p>You can reschedule your appointment through our app or website at your convenience.</p>
+          
+          <p>Thank you for your understanding and for choosing DoctorDash for your healthcare needs.</p>
+      </div>
+      <div class="footer">
+          <p>This is an automated message. Please do not reply to this email.</p>
+          <p>&copy; ${new Date().getFullYear()} DoctorDash. All rights reserved.</p>
+      </div>
+  </body>
+  </html>
+`;
+
 
 const getUploadPresignedUrl = async (req, res) => {
     
@@ -138,20 +238,39 @@ const appointmentsDoctor = async (req, res) => {
 // API to cancel appointment for doctor panel
 const appointmentCancel = async (req, res) => {
     try {
-        const { docId, appointmentId } = req.body
+        const { docId, appointmentId } = req.body;
 
-        const appointmentData = await appointmentModel.findById(appointmentId)
-        if (appointmentData && appointmentData.docId === docId) {
-            await appointmentModel.findByIdAndUpdate(appointmentId, { cancelled: true })
-            return res.json({ success: true, message: 'Appointment Cancelled' })
+        const appointmentData = await appointmentModel.findById(appointmentId);
+        if (!appointmentData || appointmentData.docId !== docId) {
+            return res.json({ success: false, message: 'Appointment not found or not authorized' });
         }
+        
+        await appointmentModel.findByIdAndUpdate(appointmentId, { cancelled: true });
+        
+        // Get user data to send email
+        const userData = await userModel.findById(appointmentData.userId).select("-password");
+        
+        // Send cancellation email to the user
+        if (userData && userData.email) {
+            const emailHtml = doctorCancellationTemplate(userData, appointmentData);
+            sendNotificationEmail(userData.email, "Appointment Cancelled by Doctor - DoctorDash", emailHtml);
+        }
+        
+        // Releasing doctor slot
+        const { slotDate, slotTime } = appointmentData;
+        const doctorData = await doctorModel.findById(docId);
+        
+        let slots_booked = doctorData.slots_booked;
+        slots_booked[slotDate] = slots_booked[slotDate].filter(e => e !== slotTime);
+        
+        await doctorModel.findByIdAndUpdate(docId, { slots_booked });
 
-        res.json({ success: false, message: 'Appointment Cancelled' })
+        return res.json({ success: true, message: 'Appointment Cancelled' });
     } catch (error) {
-        console.log(error)
-        res.json({ success: false, message: error.message })
+        console.log(error);
+        res.json({ success: false, message: error.message });
     }
-}
+};
 
 // API to mark appointment completed for doctor panel
 const appointmentComplete = async (req, res) => {
@@ -336,7 +455,7 @@ const doctorDashboard = async (req, res) => {
     const { docId } = req.body;
 
     // Get all paid appointments
-    const paidAppointments = await appointmentModel.find({ docId, isCompleted: true });
+    const paidAppointments = await appointmentModel.find({ docId, payment: true });
 
     // Total earnings
     const earnings = paidAppointments.reduce((sum, appointment) => sum + appointment.amount, 0);

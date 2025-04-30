@@ -111,6 +111,7 @@ const DoctorAppointments = () => {
       
       if (data.success) {
         toast.success('Prescription uploaded successfully')
+        completeAppointment(appointmentId) // Mark appointment as completed
         getAppointments() // Refresh appointments list
       } else {
         toast.error(data.message || 'Failed to save prescription')
@@ -127,8 +128,15 @@ const DoctorAppointments = () => {
       fileInputRef.current.setAttribute('data-appointment-id', appointmentId)
       fileInputRef.current.click()
     }
-  }
 
+  }
+  const handleCompleteClick = async (appointmentId) => {
+    handleUploadClick(appointmentId)
+    // if(appointments.find((item) => item._id === appointmentId).prescription){
+    // await completeAppointment(appointmentId)
+    // getAppointments()
+    // }
+  }
   return (
     <div className='w-full max-w-6xl m-5'>
       <p className='mb-3 text-lg font-medium'>All Appointments</p>
@@ -166,7 +174,7 @@ const DoctorAppointments = () => {
                   ? <p className='text-green-500 text-xs font-medium'>Completed</p>
                   : <div className='flex'>
                     <img onClick={() => cancelAppointment(item._id)} className='w-10 cursor-pointer' src={assets.cancel_icon} alt="Cancel" />
-                    <img onClick={() => completeAppointment(item._id)} className='w-10 cursor-pointer' src={assets.tick_icon} alt="Complete" />
+                    <img onClick={() => handleCompleteClick(item._id)} className='w-10 cursor-pointer' src={assets.tick_icon} alt="Complete" />
                   </div>
               }
               <div>

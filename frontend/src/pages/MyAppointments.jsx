@@ -10,7 +10,6 @@ const MyAppointments = () => {
     const navigate = useNavigate()
 
     const [appointments, setAppointments] = useState([])
-    const [payment, setPayment] = useState('')
     const [downloadingPrescription, setDownloadingPrescription] = useState(null)
     const [reviewModalOpen, setReviewModalOpen] = useState(false)
     const [selectedAppointment, setSelectedAppointment] = useState(null)
@@ -23,18 +22,48 @@ const MyAppointments = () => {
 
     // Function to format the date eg. ( 20_01_2000 => 20 Jan 2000 )
     const slotDateFormat = (slotDate) => {
-        const dateArray = slotDate.split('_')
-        return dateArray[0] + " " + months[Number(dateArray[1]) - 1] + " " + dateArray[2]
+        if (!slotDate) return "N/A";
+        try {
+            const dateArray = slotDate.split('_')
+            return dateArray[0] + " " + months[Number(dateArray[1])] + " " + dateArray[2]
+        } catch (error) {
+            console.log("Error formatting date:", error);
+            return slotDate; // Return the original string if there's an error
+        }
     }
 
     // Getting User Appointments Data Using API
     const getUserAppointments = async () => {
         try {
             const { data } = await axios.get(backendUrl + '/api/user/appointments', { headers: { token } })
-            setAppointments(data.appointments.reverse())
+            console.log("Fetched appointments:", data.appointments)
+            // Deep copy the appointments data to avoid reference issues
+            const appointmentsData = JSON.parse(JSON.stringify(data.appointments.reverse()));
+            
+            // Validate the appointments data
+            const validatedAppointments = appointmentsData.map(appointment => {
+                // Ensure docData exists
+                if (!appointment.docData) {
+                    appointment.docData = {
+                        name: "Doctor information unavailable",
+                        speciality: "",
+                        address: { line1: "", line2: "" },
+                        image: ""
+                    };
+                }
+                
+                // Ensure address exists
+                if (!appointment.docData.address) {
+                    appointment.docData.address = { line1: "", line2: "" };
+                }
+                
+                return appointment;
+            });
+            
+            setAppointments(validatedAppointments);
         } catch (error) {
             console.log(error)
-            toast.error(error.message)
+            toast.error(error.message || "Failed to fetch appointments")
         }
     }
 
@@ -45,7 +74,8 @@ const MyAppointments = () => {
 
             if (data.success) {
                 // Check if the appointment was Paid
-                if (appointments.find(item => item._id === appointmentId).payment) {
+                const appointment = appointments.find(item => item._id === appointmentId);
+                if (appointment && appointment.payment) {
                     // If paid, show refund message
                     toast.info("Appointment cancelled. Refund will be processed within 7-10 working days.")
                 }
@@ -56,7 +86,7 @@ const MyAppointments = () => {
             }
         } catch (error) {
             console.log(error)
-            toast.error(error.message)
+            toast.error(error.message || "Failed to cancel appointment")
         }
     }
 
@@ -74,7 +104,10 @@ const MyAppointments = () => {
             const link = document.createElement('a')
             link.href = appointment.prescription
             link.target = '_blank'
-            link.download = `Prescription_${appointment.docData.name}_${slotDateFormat(appointment.slotDate)}.pdf`
+            
+            // Ensure docData exists before using it
+            const docName = appointment.docData ? appointment.docData.name : "Doctor";
+            link.download = `Prescription_${docName}_${slotDateFormat(appointment.slotDate)}.pdf`
             
             // Append to document, click and then remove
             document.body.appendChild(link)
@@ -86,89 +119,6 @@ const MyAppointments = () => {
             console.log(error)
             toast.error("Failed to download prescription. Please try again.")
             setDownloadingPrescription(null)
-        }
-    }
-
-    const initPay = (order) => {
-        if (!window.Razorpay) {
-            toast.error('Razorpay SDK not loaded. Please refresh the page.');
-            return;
-        }
-    
-        const options = {
-            key: import.meta.env.VITE_RAZORPAY_KEY_ID,
-            amount: order.amount,
-            currency: order.currency,
-            name: 'Appointment Payment',
-            description: "Appointment Payment",
-            order_id: order.id,
-            receipt: order.receipt,
-            handler: async (response) => {
-                try {
-                    const { data } = await axios.post(
-                        backendUrl + "/api/user/verifyRazorpay",
-                        response,
-                        { headers: { token } }
-                    );
-    
-                    if (data.success) {
-                        toast.success("Payment successful");
-                        navigate('/my-appointments');
-                        getUserAppointments();
-                    } else {
-                        toast.error(data.message || "Payment verification failed");
-                    }
-                } catch (error) {
-                    console.log(error);
-                    toast.error(error.response?.data?.message || error.message);
-                }
-            },
-            theme: {
-                color: "#3399cc"
-            }
-        };
-    
-        const rzp = new window.Razorpay(options);
-        rzp.open();
-    
-        rzp.on('payment.failed', function (response) {
-            console.error('Payment failed:', response.error);
-            toast.error('Payment failed. Please try again.');
-        });
-    };
-    
-    const appointmentRazorpay = async (appointmentId) => {
-        try {
-            const { data } = await axios.post(
-                backendUrl + '/api/user/payment-razorpay',
-                { appointmentId },
-                { headers: { token } }
-            );
-    
-            if (data.success) {
-                initPay(data.order);
-            } else {
-                toast.error(data.message || "Failed to initiate payment");
-            }
-        } catch (error) {
-            console.error(error);
-            toast.error(error.response?.data?.message || error.message);
-        }
-    };
-    
-    // Function to make payment using stripe
-    const appointmentStripe = async (appointmentId) => {
-        try {
-            const { data } = await axios.post(backendUrl + '/api/user/payment-stripe', { appointmentId }, { headers: { token } })
-            if (data.success) {
-                const { session_url } = data
-                window.location.replace(session_url)
-            } else {
-                toast.error(data.message)
-            }
-        } catch (error) {
-            console.log(error)
-            toast.error(error.message)
         }
     }
 
@@ -288,129 +238,136 @@ const MyAppointments = () => {
         }
     }, [token])
 
+    console.log("Rendering appointments:", appointments)
+
+
+    const resendConfirmation = async (selectedAppointment) => {
+        try {
+            const { data } = await axios.post(backendUrl + '/api/user/resend-confirmation', { appointmentId: selectedAppointment._id }, { headers: { token } })
+            if (data.success) {
+                toast.success(data.message)
+            } else {
+                toast.error(data.message)
+            }
+        } catch (error) {
+            console.log(error)
+            toast.error(error.message || "Failed to resend confirmation")
+        }
+    }
     return (
         <div className="relative">
             <p className='pb-3 mt-12 text-lg font-medium text-gray-600 border-b'>My appointments</p>
             <div className=''>
-                {appointments.map((item, index) => (
-                    <div key={index} className='grid grid-cols-[1fr_2fr] gap-4 sm:flex sm:gap-6 py-4 border-b'>
-                        <div>
-                            <img className='w-36 bg-[#EAEFFF]' src={item.docData.image} alt="" />
-                        </div>
-                        <div className='flex-1 text-sm text-[#5E5E5E]'>
-                            <p className='text-[#262626] text-base font-semibold'>{item.docData.name}</p>
-                            <p>{item.docData.speciality}</p>
-                            <p className='text-[#464646] font-medium mt-1'>Address:</p>
-                            <p className=''>{item.docData.address.line1}</p>
-                            <p className=''>{item.docData.address.line2}</p>
-                            <p className=' mt-1'><span className='text-sm text-[#3C3C3C] font-medium'>Date & Time:</span> {slotDateFormat(item.slotDate)} |  {item.slotTime}</p>
-                            
-                            {/* Review Section */}
-                            {item.isCompleted && item.patientReview && (
-                                <div className="mt-3 p-2 bg-gray-50 rounded">
-                                    <div className="flex items-center justify-between">
-                                        <p className="text-sm font-medium text-gray-700">Your Review</p>
-                                        <div className="flex space-x-2">
-                                            <button 
-                                                onClick={() => openReviewModal(item)}
-                                                className="text-xs text-blue-600 hover:text-blue-800"
-                                            >
-                                                Edit
-                                            </button>
-                                            <button 
-                                                onClick={() => deleteReview(item._id)}
-                                                className="text-xs text-red-600 hover:text-red-800"
-                                            >
-                                                Delete
-                                            </button>
+                {appointments && appointments.length > 0 ? (
+                    appointments.map((item, index) => (
+                        <div key={index} className='grid grid-cols-[1fr_2fr] gap-4 sm:flex sm:gap-6 py-4 border-b'>
+                            <div>
+                                <img className='w-36 bg-[#EAEFFF]' src={item.docData?.image || assets.user_placeholder} alt="" />
+                            </div>
+                            <div className='flex-1 text-sm text-[#5E5E5E]'>
+                                <p className='text-[#262626] text-base font-semibold'>{item.docData?.name || "Doctor information unavailable"}</p>
+                                <p>{item.docData?.speciality || ""}</p>
+                                <p className='text-[#464646] font-medium mt-1'>Address:</p>
+                                <p className=''>{item.docData?.address?.line1 || ""}</p>
+                                <p className=''>{item.docData?.address?.line2 || ""}</p>
+                                <p className=' mt-1'>
+                                    <span className='text-sm text-[#3C3C3C] font-medium'>Date & Time:</span> 
+                                    {item.slotDate ? slotDateFormat(item.slotDate) : "N/A"} | {item.slotTime || "N/A"}
+                                </p>
+                                
+                                {/* Review Section */}
+                                {item.isCompleted && item.patientReview && (
+                                    <div className="mt-3 p-2 bg-gray-50 rounded">
+                                        <div className="flex items-center justify-between">
+                                            <p className="text-sm font-medium text-gray-700">Your Review</p>
+                                            <div className="flex space-x-2">
+                                                <button 
+                                                    onClick={() => openReviewModal(item)}
+                                                    className="text-xs text-blue-600 hover:text-blue-800"
+                                                >
+                                                    Edit
+                                                </button>
+                                                <button 
+                                                    onClick={() => deleteReview(item._id)}
+                                                    className="text-xs text-red-600 hover:text-red-800"
+                                                >
+                                                    Delete
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div className="mt-1">
+                                            <StarRating rating={item.patientReview.rating} />
+                                            <p className="mt-1 text-sm">{item.patientReview.comment}</p>
                                         </div>
                                     </div>
-                                    <div className="mt-1">
-                                        <StarRating rating={item.patientReview.rating} />
-                                        <p className="mt-1 text-sm">{item.patientReview.comment}</p>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                        <div></div>
-                        <div className='flex flex-col gap-2 justify-end text-sm text-center'>
-                            {/* Download Prescription Button for completed appointments */}
-                            {item.isCompleted && (
-                                <button 
-                                    onClick={() => downloadPrescription(item)} 
-                                    className='sm:min-w-48 py-2 border border-primary rounded text-primary hover:bg-primary hover:text-white transition-all duration-300 flex items-center justify-center'
-                                    disabled={downloadingPrescription === item._id}
-                                >
-                                    {downloadingPrescription === item._id ? (
-                                        'Downloading...'
-                                    ) : (
-                                        <span className='flex items-center gap-1'>
-                                            Download Prescription
-                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                            </svg>
-                                        </span>
-                                    )}
-                                </button>
-                            )}
-                            
-                            {/* Review Button for completed appointments */}
-                            {item.isCompleted && !item.patientReview && (
-                                <button 
-                                    onClick={() => openReviewModal(item)}
-                                    className='sm:min-w-48 py-2 border border-yellow-500 rounded text-yellow-500 hover:bg-yellow-500 hover:text-white transition-all duration-300'
-                                >
-                                    Add Review
-                                </button>
-                            )}
-                            
-                            {!item.cancelled && !item.payment && !item.isCompleted && payment !== item._id && (
-                                <button 
-                                    onClick={() => setPayment(item._id)} 
-                                    className='text-[#696969] sm:min-w-48 py-2 border rounded hover:bg-primary hover:text-white transition-all duration-300'
-                                >
-                                    Pay Online
-                                </button>
-                            )}
-                            
-                            {!item.cancelled && !item.payment && !item.isCompleted && payment === item._id && (
-                                <button 
-                                    onClick={() => appointmentRazorpay(item._id)} 
-                                    className='text-[#696969] sm:min-w-48 py-2 border rounded hover:bg-gray-100 hover:text-white transition-all duration-300 flex items-center justify-center'
-                                >
-                                    <img className='max-w-20 max-h-5' src={assets.razorpay_logo} alt="" />
-                                </button>
-                            )}
-                            
-                            {!item.cancelled && item.payment && !item.isCompleted && (
-                                <button className='sm:min-w-48 py-2 border rounded text-[#696969] bg-[#EAEFFF]'>
-                                    Paid
-                                </button>
-                            )}
+                                )}
+                            </div>
+                            <div></div>
+                            <div className='flex flex-col gap-2 justify-end text-sm text-center'>
+                                {/* Download Prescription Button for completed appointments */}
+                                {item.isCompleted && (
+                                    <button 
+                                        onClick={() => downloadPrescription(item)} 
+                                        className='sm:min-w-48 py-2 border border-primary rounded text-primary hover:bg-primary hover:text-white transition-all duration-300 flex items-center justify-center'
+                                        disabled={downloadingPrescription === item._id}
+                                    >
+                                        {downloadingPrescription === item._id ? (
+                                            'Downloading...'
+                                        ) : (
+                                            <span className='flex items-center gap-1'>
+                                                Download Prescription
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                                </svg>
+                                            </span>
+                                        )}
+                                    </button>
+                                )}
+                                
+                                {/* Review Button for completed appointments */}
+                                {item.isCompleted && !item.patientReview && (
+                                    <button 
+                                        onClick={() => openReviewModal(item)}
+                                        className='sm:min-w-48 py-2 border border-yellow-500 rounded text-yellow-500 hover:bg-yellow-500 hover:text-white transition-all duration-300'
+                                    >
+                                        Add Review
+                                    </button>
+                                )}
+                                
+                                {!item.cancelled && item.payment && !item.isCompleted && (
+                                    <button onClick={()=>resendConfirmation(item)} className='sm:min-w-48 py-2 border rounded text-[#696969] bg-[#EAEFFF]'>
+                                        Resend confirmation
+                                    </button>
+                                )}
 
-                            {item.isCompleted && (
-                                <button className='sm:min-w-48 py-2 border border-green-500 rounded text-green-500'>
-                                    Completed
-                                </button>
-                            )}
+                                {item.isCompleted && (
+                                    <button className='sm:min-w-48 py-2 border border-green-500 rounded text-green-500'>
+                                        Completed
+                                    </button>
+                                )}
 
-                            {!item.cancelled && !item.isCompleted && (
-                                <button 
-                                    onClick={() => cancelAppointment(item._id)} 
-                                    className='text-[#696969] sm:min-w-48 py-2 border rounded hover:bg-red-600 hover:text-white transition-all duration-300'
-                                >
-                                    Cancel appointment
-                                </button>
-                            )}
-                            
-                            {item.cancelled && !item.isCompleted && (
-                                <button className='sm:min-w-48 py-2 border border-red-500 rounded text-red-500'>
-                                    Appointment cancelled
-                                </button>
-                            )}
+                                {!item.cancelled && !item.isCompleted && (
+                                    <button 
+                                        onClick={() => cancelAppointment(item._id)} 
+                                        className='text-[#696969] sm:min-w-48 py-2 border rounded hover:bg-red-600 hover:text-white transition-all duration-300'
+                                    >
+                                        Cancel appointment
+                                    </button>
+                                )}
+                                
+                                {item.cancelled && !item.isCompleted && (
+                                    <button className='sm:min-w-48 py-2 border border-red-500 rounded text-red-500'>
+                                        Appointment cancelled
+                                    </button>
+                                )}
+                            </div>
                         </div>
+                    ))
+                ) : (
+                    <div className="py-10 text-center">
+                        <p className="text-gray-500">No appointments found. Book your first appointment now!</p>
                     </div>
-                ))}
+                )}
             </div>
 
             {/* Review Modal */}
@@ -434,7 +391,7 @@ const MyAppointments = () => {
                         <form onSubmit={submitReview}>
                             <div className="mb-4">
                                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Doctor: {selectedAppointment.docData.name}
+                                    Doctor: {selectedAppointment.docData?.name || "Doctor"}
                                 </label>
                                 <div className="mb-2">
                                     <label className="block text-sm font-medium text-gray-700 mb-1">

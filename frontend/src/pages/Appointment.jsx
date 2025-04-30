@@ -15,8 +15,11 @@ const Appointment = () => {
     const [docSlots, setDocSlots] = useState([])
     const [slotIndex, setSlotIndex] = useState(0)
     const [slotTime, setSlotTime] = useState('')
+    const [holdId, setHoldId] = useState(null)
+    const [paymentStep, setPaymentStep] = useState(false)
     const [reviews, setReviews] = useState([])
     const [loading, setLoading] = useState(false)
+    const [processingPayment, setProcessingPayment] = useState(false)
 
     const navigate = useNavigate()
 
@@ -79,7 +82,11 @@ const Appointment = () => {
 
                 const isSlotAvailable = docInfo.slots_booked[slotDate] && docInfo.slots_booked[slotDate].includes(slotTime) ? false : true
 
-                if (isSlotAvailable) {
+                // Also check if slot is on hold
+                const slotsOnHold = docInfo.slots_on_hold || {}
+                const isSlotOnHold = slotsOnHold[slotDate] && slotsOnHold[slotDate][slotTime]
+
+                if (isSlotAvailable && !isSlotOnHold) {
                     // Add slot to array
                     timeSlots.push({
                         datetime: new Date(currentDate),
@@ -95,10 +102,15 @@ const Appointment = () => {
         }
     }
 
-    const bookAppointment = async () => {
+    const holdSlot = async () => {
         if (!token) {
             toast.warning('Login to book appointment')
             return navigate('/login')
+        }
+
+        if (!slotTime) {
+            toast.warning('Please select a time slot')
+            return
         }
 
         const date = docSlots[slotIndex][0].datetime
@@ -110,17 +122,176 @@ const Appointment = () => {
         const slotDate = day + "_" + month + "_" + year
 
         try {
-            const { data } = await axios.post(backendUrl + '/api/user/book-appointment', { docId, slotDate, slotTime }, { headers: { token } })
+            const { data } = await axios.post(
+                backendUrl + '/api/user/hold-slot', 
+                { docId, slotDate, slotTime }, 
+                { headers: { token } }
+            )
+            
             if (data.success) {
-                toast.success(data.message)
-                getDoctosData()
-                navigate('/my-appointments')
+                setHoldId(data.holdId)
+                setPaymentStep(true)
             } else {
                 toast.error(data.message)
             }
         } catch (error) {
             console.log(error)
             toast.error(error.message)
+        }
+    }
+
+    const releaseHeldSlot = async () => {
+        if (!holdId) return
+        
+        try {
+            await axios.post(
+                backendUrl + '/api/user/release-slot',
+                { holdId },
+                { headers: { token } }
+            )
+        } catch (error) {
+            console.log(error)
+        }
+        
+        setHoldId(null)
+        setPaymentStep(false)
+    }
+
+    const finalizeBooking = async () => {
+        try {
+            const { data } = await axios.post(
+                backendUrl + '/api/user/finalize-booking',
+                { holdId },
+                { headers: { token } }
+            )
+            
+            if (data.success) {
+                toast.success(data.message)
+                getDoctosData()
+                navigate('/my-appointments')
+            } else {
+                toast.error(data.message)
+                // Refresh slots if booking failed
+                getAvailableSolts()
+                setPaymentStep(false)
+            }
+        } catch (error) {
+            console.log(error)
+            toast.error(error.message)
+            setPaymentStep(false)
+        }
+    }
+
+    const handlePaymentRazorpay = async () => {
+        if (!holdId) {
+            toast.error('Selected slot is no longer available')
+            return
+        }
+        
+        setProcessingPayment(true)
+        
+        try {
+            const { data } = await axios.post(
+                backendUrl + '/api/user/payment-razorpay',
+                { holdId, docId },
+                { headers: { token } }
+            )
+            
+            if (data.success) {
+                initRazorpayPayment(data.order)
+            } else {
+                toast.error(data.message || "Failed to initiate payment")
+                releaseHeldSlot()
+            }
+        } catch (error) {
+            console.error(error)
+            toast.error(error.response?.data?.message || error.message)
+            releaseHeldSlot()
+        } finally {
+            setProcessingPayment(false)
+        }
+    }
+
+    const initRazorpayPayment = (order) => {
+        if (!window.Razorpay) {
+            toast.error('Razorpay SDK not loaded. Please refresh the page.')
+            return
+        }
+     
+        const options = {
+            key: import.meta.env.VITE_RAZORPAY_KEY_ID,
+            amount: order.amount,
+            currency: order.currency,
+            name: 'Appointment Payment',
+            description: "Appointment Payment",
+            order_id: order.id,
+            handler: async (response) => {
+                try {
+                    const { data } = await axios.post(
+                        backendUrl + "/api/user/verify-razorpay",
+                        { ...response, holdId },
+                        { headers: { token } }
+                    )
+     
+                    if (data.success) {
+                        finalizeBooking()
+                    } else {
+                        toast.error(data.message || "Payment verification failed")
+                        releaseHeldSlot()
+                    }
+                } catch (error) {
+                    console.log(error)
+                    toast.error(error.response?.data?.message || error.message)
+                    releaseHeldSlot()
+                }
+            },
+            modal: {
+                ondismiss: function() {
+                    releaseHeldSlot()
+                }
+            },
+            theme: {
+                color: "#3399cc"
+            }
+        }
+     
+        const rzp = new window.Razorpay(options)
+        rzp.open()
+     
+        rzp.on('payment.failed', function (response) {
+            console.error('Payment failed:', response.error)
+            toast.error('Payment failed. Please try again.')
+            releaseHeldSlot()
+        })
+    }
+
+    const handlePaymentStripe = async () => {
+        if (!holdId) {
+            toast.error('Selected slot is no longer available')
+            return
+        }
+        
+        setProcessingPayment(true)
+        
+        try {
+            const { data } = await axios.post(
+                backendUrl + '/api/user/payment-stripe',
+                { holdId, docId },
+                { headers: { token } }
+            )
+            
+            if (data.success && data.session_url) {
+                window.location.href = data.session_url
+            } else {
+                toast.error(data.message || "Failed to initiate payment")
+                releaseHeldSlot()
+            }
+        } catch (error) {
+            console.error(error)
+            toast.error(error.response?.data?.message || error.message)
+            releaseHeldSlot()
+        } finally {
+            setProcessingPayment(false)
         }
     }
 
@@ -158,6 +329,13 @@ const Appointment = () => {
     useEffect(() => {
         if (doctors.length > 0) {
             fetchDocInfo()
+        }
+        
+        // Cleanup function to release held slot if component unmounts
+        return () => {
+            if (holdId) {
+                releaseHeldSlot()
+            }
         }
     }, [doctors, docId])
 
@@ -207,26 +385,93 @@ const Appointment = () => {
                 </div>
             </div>
 
-            {/* Booking slots */}
-            <div className='sm:ml-72 sm:pl-4 mt-8 font-medium text-[#565656]'>
-                <p>Booking slots</p>
-                <div className='flex gap-3 items-center w-full overflow-x-scroll mt-4'>
-                    {docSlots.length && docSlots.map((item, index) => (
-                        <div onClick={() => setSlotIndex(index)} key={index} className={`text-center py-6 min-w-16 rounded-full cursor-pointer ${slotIndex === index ? 'bg-primary text-white' : 'border border-[#DDDDDD]'}`}>
-                            <p>{item[0] && daysOfWeek[item[0].datetime.getDay()]}</p>
-                            <p>{item[0] && item[0].datetime.getDate()}</p>
+            {!paymentStep ? (
+                /* Booking slots */
+                <div className='sm:ml-72 sm:pl-4 mt-8 font-medium text-[#565656]'>
+                    <p>Select appointment date and time</p>
+                    <div className='flex gap-3 items-center w-full overflow-x-scroll mt-4'>
+                        {docSlots.length && docSlots.map((item, index) => (
+                            <div onClick={() => {
+                                setSlotIndex(index)
+                                setSlotTime('')
+                            }} key={index} className={`text-center py-6 min-w-16 rounded-full cursor-pointer ${slotIndex === index ? 'bg-primary text-white' : 'border border-[#DDDDDD]'}`}>
+                                <p>{item[0] && daysOfWeek[item[0].datetime.getDay()]}</p>
+                                <p>{item[0] && item[0].datetime.getDate()}</p>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className='flex items-center gap-3 w-full overflow-x-scroll mt-4'>
+                        {docSlots.length && docSlots[slotIndex].map((item, index) => (
+                            <p onClick={() => setSlotTime(item.time)} key={index} className={`text-sm font-light flex-shrink-0 px-5 py-2 rounded-full cursor-pointer ${item.time === slotTime ? 'bg-primary text-white' : 'text-[#949494] border border-[#B4B4B4]'}`}>{item.time.toLowerCase()}</p>
+                        ))}
+                    </div>
+
+                    <button 
+                        onClick={holdSlot} 
+                        disabled={!slotTime}
+                        className={`text-white text-sm font-light px-20 py-3 rounded-full mt-6 ${!slotTime ? 'bg-gray-400 cursor-not-allowed' : 'bg-primary hover:bg-primary-dark'}`}
+                    >
+                        Proceed to Payment
+                    </button>
+                </div>
+            ) : (
+                /* Payment options */
+                <div className='sm:ml-72 sm:pl-4 mt-8 font-medium text-[#565656]'>
+                    <div className='bg-white p-6 border border-gray-200 rounded-lg'>
+                        <h3 className='text-xl font-medium text-gray-700 mb-4'>Appointment Summary</h3>
+                        
+                        <div className='space-y-2 mb-6'>
+                            <div className='flex justify-between'>
+                                <span className='text-gray-600'>Doctor:</span>
+                                <span className='font-medium'>{docInfo.name}</span>
+                            </div>
+                            <div className='flex justify-between'>
+                                <span className='text-gray-600'>Date:</span>
+                                <span className='font-medium'>
+                                    {docSlots[slotIndex][0] && new Date(docSlots[slotIndex][0].datetime)
+                                        .toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                </span>
+                            </div>
+                            <div className='flex justify-between'>
+                                <span className='text-gray-600'>Time:</span>
+                                <span className='font-medium'>{slotTime}</span>
+                            </div>
+                            <div className='flex justify-between border-t pt-2 mt-2'>
+                                <span className='text-gray-600'>Amount:</span>
+                                <span className='font-medium'>{currencySymbol}{docInfo.fees}</span>
+                            </div>
                         </div>
-                    ))}
+                        
+                        <p className='text-gray-700 mb-4'>Select Payment Method:</p>
+                        
+                        <div className='space-y-3'>
+                            <button 
+                                onClick={handlePaymentRazorpay}
+                                disabled={processingPayment}
+                                className='w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 flex justify-center items-center'
+                            >
+                                {processingPayment ? 'Processing...' : 'Pay with Razorpay'}
+                            </button>
+                            
+                            {/* <button 
+                                onClick={handlePaymentStripe}
+                                disabled={processingPayment}
+                                className='w-full bg-purple-600 text-white py-3 rounded-lg hover:bg-purple-700 flex justify-center items-center'
+                            >
+                                {processingPayment ? 'Processing...' : 'Pay with Stripe'}
+                            </button> */}
+                        </div>
+                        
+                        <button 
+                            onClick={releaseHeldSlot}
+                            className='w-full text-gray-600 mt-4 hover:underline'
+                        >
+                            Cancel and select different time
+                        </button>
+                    </div>
                 </div>
-
-                <div className='flex items-center gap-3 w-full overflow-x-scroll mt-4'>
-                    {docSlots.length && docSlots[slotIndex].map((item, index) => (
-                        <p onClick={() => setSlotTime(item.time)} key={index} className={`text-sm font-light  flex-shrink-0 px-5 py-2 rounded-full cursor-pointer ${item.time === slotTime ? 'bg-primary text-white' : 'text-[#949494] border border-[#B4B4B4]'}`}>{item.time.toLowerCase()}</p>
-                    ))}
-                </div>
-
-                <button onClick={bookAppointment} className='bg-primary text-white text-sm font-light px-20 py-3 rounded-full my-6'>Book an appointment</button>
-            </div>
+            )}
 
             {/* Patient Reviews Section */}
             <div className='mt-10 mb-12'>

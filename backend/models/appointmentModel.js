@@ -20,6 +20,7 @@ const appointmentSchema = new mongoose.Schema({
     isCompleted: { type: Boolean, default: false },
     prescription: { type: String, default: "" },
     storageKey: { type: String, default: "" },
+    transactionId: { type: String, default: "" },
     patientReview: { type: reviewSchema, default: undefined } // Optional field, no default object
 })
 

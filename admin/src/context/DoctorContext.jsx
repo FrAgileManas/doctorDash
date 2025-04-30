@@ -20,6 +20,7 @@ const DoctorContextProvider = (props) => {
 
     // Getting Doctor appointment data from Database using API
     const getAppointments = async () => {
+        console.log('Getting appointments')
         try {
             const { data } = await axios.get(backendUrl + '/api/doctor/appointments', { headers: { dToken } })
 
