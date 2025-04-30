@@ -1,6 +1,7 @@
 import express from 'express';
 import { loginUser, registerUser, getProfile, updateProfile, bookAppointment, listAppointment, cancelAppointment, paymentRazorpay, verifyRazorpay, addReview, deleteReview,holdSlot,finalizeBooking,releaseHeldSlot,resendConfirmationEmail } from '../controllers/userController.js';
 import { addVital, getVitalsByDate, updateVital, deleteVital, getAllVitals } from '../controllers/vitalController.js';
+import { getRoom } from '../controllers/roomController.js';
 import upload from '../middleware/multer.js';
 import authUser from '../middleware/authUser.js';
 const userRouter = express.Router();
@@ -31,5 +32,8 @@ userRouter.get("/vitals", authUser, getVitalsByDate)
 userRouter.put("/vitals/:id", authUser, updateVital)
 userRouter.delete("/vitals/:id", authUser, deleteVital)
 userRouter.get("/all-vitals", authUser, getAllVitals)
+
+// Room endpoints
+userRouter.get("/room/:appointmentId", authUser, getRoom)
 
 export default userRouter;

@@ -18,6 +18,7 @@ import {
     getMyReviews
 } from '../controllers/doctorController.js';
 import authDoctor from '../middleware/authDoctor.js';
+import {getRoom }from '../controllers/roomController.js';
 const doctorRouter = express.Router();
 
 doctorRouter.post("/login", loginDoctor);
@@ -42,5 +43,8 @@ doctorRouter.get("/patient/:patientId/appointments", authDoctor, patientAppointm
 // New routes for R2 file storage
 doctorRouter.post("/get-upload-url", authDoctor, getUploadPresignedUrl);
 doctorRouter.post("/save-prescription", authDoctor, savePrescription);
+
+// New rouite for room
+doctorRouter.get("/room/:appointmentId", authDoctor, getRoom);
 
 export default doctorRouter;

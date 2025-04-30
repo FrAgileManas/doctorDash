@@ -6,6 +6,7 @@ import { assets } from '../../assets/assets'
 import { AppContext } from '../../context/AppContext'
 import axios from 'axios'
 import { toast } from 'react-toastify'
+import { useNavigate } from 'react-router-dom'
 
 const DoctorDashboard = () => {
   const { dToken, dashData, getDashData, cancelAppointment, completeAppointment, getAppointments } = useContext(DoctorContext)
@@ -14,6 +15,8 @@ const DoctorDashboard = () => {
   const [loading, setLoading] = useState(false)
   const fileInputRef = useRef(null)
   const [uploadingPrescription, setUploadingPrescription] = useState(null)
+  const navigate = useNavigate()
+  
   useEffect(() => {
     if (dToken) {
       getDashData()
@@ -72,16 +75,7 @@ const DoctorDashboard = () => {
         throw new Error('Failed to get upload URL')
       }
       
-      // Step 2: Upload the file directly to R2 using the presigned URL
-      // await axios.put(
-      //   presignedData.uploadUrl,
-      //   file,
-      //   { 
-      //     headers: { 
-      //       'Content-Type': file.type,
-      //     },
-      //   }
-      // )
+  
       await fetch(presignedData.uploadUrl, {
         method: 'PUT',
         headers: {
@@ -135,7 +129,10 @@ const DoctorDashboard = () => {
     }
   }
 
-
+  // Function to handle join appointment
+  const handleJoinAppointment = (appointmentId) => {
+    navigate(`/room/${appointmentId}`)
+  }
 
   const fetchDoctorReviews = async () => {
     setLoading(true)
@@ -237,10 +234,16 @@ const DoctorDashboard = () => {
                 ? <p className='text-red-400 text-xs font-medium'>Cancelled</p>
                 : item.isCompleted
                   ? <p className='text-green-500 text-xs font-medium'>Completed</p>
-                  : <div className='flex'>
-                    <img onClick={() => cancelAppointment(item._id)} className='w-10 cursor-pointer' src={assets.cancel_icon} alt="" />
-                    <img onClick={() => handleUploadClick(item._id)} className='w-10 cursor-pointer' src={assets.tick_icon} alt="" />
-                  </div>
+                  : <div className='flex gap-2'>
+                      <button 
+                        onClick={() => handleJoinAppointment(item._id)}
+                        className='px-3 py-1 bg-blue-500 text-white rounded text-xs font-medium hover:bg-blue-600'
+                      >
+                        Join Now
+                      </button>
+                      <img onClick={() => cancelAppointment(item._id)} className='w-10 cursor-pointer' src={assets.cancel_icon} alt="" />
+                      <img onClick={() => handleUploadClick(item._id)} className='w-10 cursor-pointer' src={assets.tick_icon} alt="" />
+                    </div>
               }
             </div>
           ))}

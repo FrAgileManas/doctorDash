@@ -14,7 +14,7 @@ import Footer from './components/Footer'
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import Verify from './pages/Verify'
-
+import Room from './pages/Room'
 const App = () => {
   return (
     <div className='mx-4 sm:mx-[10%]'>
@@ -29,6 +29,7 @@ const App = () => {
         <Route path='/about' element={<About />} />
         <Route path='/contact' element={<Contact />} />
         <Route path='/appointment/:docId' element={<Appointment />} />
+        <Route path='/room/:appointmentId' element={<Room />} />
         <Route path='/my-appointments' element={<MyAppointments />} />
         <Route path='/my-profile' element={<MyProfile />} />
         <Route path='/verify' element={<Verify />} />

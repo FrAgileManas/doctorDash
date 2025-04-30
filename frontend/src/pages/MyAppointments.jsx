@@ -36,7 +36,7 @@ const MyAppointments = () => {
     const getUserAppointments = async () => {
         try {
             const { data } = await axios.get(backendUrl + '/api/user/appointments', { headers: { token } })
-            console.log("Fetched appointments:", data.appointments)
+            // console.log("Fetched appointments:", data.appointments)
             // Deep copy the appointments data to avoid reference issues
             const appointmentsData = JSON.parse(JSON.stringify(data.appointments.reverse()));
             
@@ -238,7 +238,7 @@ const MyAppointments = () => {
         }
     }, [token])
 
-    console.log("Rendering appointments:", appointments)
+    // console.log("Rendering appointments:", appointments)
 
 
     const resendConfirmation = async (selectedAppointment) => {
@@ -254,6 +254,89 @@ const MyAppointments = () => {
             toast.error(error.message || "Failed to resend confirmation")
         }
     }
+    const handleJoinRoom = (item) => {
+        // Parse the slot date and time
+        const [day, month, year] = item.slotDate.split('_').map(num => parseInt(num));
+        const timeStr = item.slotTime;
+        
+        // Convert the time string (e.g., "06:00 PM") to 24-hour format
+        let [hourMin, ampm] = timeStr.split(' ');
+        let [hours, minutes] = hourMin.split(':').map(num => parseInt(num));
+        
+        // Convert to 24-hour format
+        if (ampm === 'PM' && hours < 12) {
+          hours += 12;
+        } else if (ampm === 'AM' && hours === 12) {
+          hours = 0;
+        }
+        
+        // Create appointment DateTime object with the full date
+        const appointmentTime = new Date(year, month , day, hours, minutes);
+        
+        // Calculate 5 minutes before and 1 hour after
+        const fiveMinBefore = new Date(appointmentTime.getTime() - 5 * 60 * 1000);
+        const oneHourAfter = new Date(appointmentTime.getTime() + 60 * 60 * 1000);
+      
+        
+        // Get current time
+        const currentTime = new Date();
+       
+        // Check if current time is within the allowed window
+        if (currentTime < fiveMinBefore) {
+            console.log("Appointment not available yet");
+          toast.info(`This appointment will be available 5 minutes before the scheduled time (${item.slotTime})`);
+          return;
+        } else if (currentTime > oneHourAfter) {
+          toast.error('This appointment has expired');
+          return;
+        }
+        
+        // If we're within the valid time window, navigate to the room
+        navigate(`/room/${item._id}`);
+      };
+
+      const cancelHandler = (item) => {
+        // Parse the slot date and time
+        const [day, month, year] = item.slotDate.split('_').map(num => parseInt(num));
+        const timeStr = item.slotTime;
+        
+        // Convert the time string (e.g., "06:00 PM") to 24-hour format
+        let [hourMin, ampm] = timeStr.split(' ');
+        let [hours, minutes] = hourMin.split(':').map(num => parseInt(num));
+        
+        // Convert to 24-hour format
+        if (ampm === 'PM' && hours < 12) {
+          hours += 12;
+        } else if (ampm === 'AM' && hours === 12) {
+          hours = 0;
+        }
+        
+        // Create appointment DateTime object
+        const appointmentTime = new Date(year, month, day, hours, minutes);
+        
+        // Calculate 6 hours before and 1 hour after
+        const sixHoursBefore = new Date(appointmentTime.getTime() - 6 * 60 * 60 * 1000);
+        const oneHourAfter = new Date(appointmentTime.getTime() + 60 * 60 * 1000);
+        
+        // Get current time
+        const currentTime = new Date();
+        
+        // Check if appointment is missed (more than 1 hour has passed)
+        if (currentTime > oneHourAfter) {
+          // Navigate to reschedule page
+          navigate(`/appointment/${item.docId}`);
+          return;
+        }
+        
+        // Check if less than 6 hours are left before appointment
+        if (currentTime > sixHoursBefore) {
+          toast.error('Cannot cancel appointments less than 6 hours before the scheduled time');
+          return;
+        }
+        
+        // If we're more than 6 hours before, proceed with cancellation
+        cancelAppointment(item._id);
+      };
     return (
         <div className="relative">
             <p className='pb-3 mt-12 text-lg font-medium text-gray-600 border-b'>My appointments</p>
@@ -346,13 +429,28 @@ const MyAppointments = () => {
                                     </button>
                                 )}
 
-                                {!item.cancelled && !item.isCompleted && (
+                                {!item.cancelled && !item.isCompleted && (<>
                                     <button 
-                                        onClick={() => cancelAppointment(item._id)} 
-                                        className='text-[#696969] sm:min-w-48 py-2 border rounded hover:bg-red-600 hover:text-white transition-all duration-300'
-                                    >
-                                        Cancel appointment
-                                    </button>
+  onClick={() => cancelHandler(item)} 
+  className='text-[#696969] sm:min-w-48 py-2 border rounded hover:bg-red-600 hover:text-white transition-all duration-300'
+>
+  {new Date() > new Date(
+    ...item.slotDate.split('_').map(num => parseInt(num)).reverse(),  // Convert DD_MM_YYYY to [YYYY, MM-1, DD]
+    ...(() => {
+      let [hourMin, ampm] = item.slotTime.split(' ');
+      let [hours, minutes] = hourMin.split(':').map(num => parseInt(num));
+      if (ampm === 'PM' && hours < 12) hours += 12;
+      else if (ampm === 'AM' && hours === 12) hours = 0;
+      return [hours, minutes];
+    })()
+  ).getTime() + 60 * 60 * 1000 ? 'Reschedule' : 'Cancel appointment'}
+</button>
+                                    <button 
+  onClick={() => handleJoinRoom(item)} 
+  className='text-[#696969] sm:min-w-48 py-2 border rounded hover:bg-green-600 hover:text-white transition-all duration-300'
+>
+  Join now
+</button></>
                                 )}
                                 
                                 {item.cancelled && !item.isCompleted && (
