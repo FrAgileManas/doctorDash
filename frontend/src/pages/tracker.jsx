@@ -6,6 +6,7 @@ import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import VitalsChart from '../components/vitalsChart';
 import * as XLSX from 'xlsx';
+import VitalReminders from '../components/VitalReminders';
 
 const Tracker = () => {
   const { backendUrl, token, userData } = useContext(AppContext);
@@ -435,7 +436,8 @@ const Tracker = () => {
         
         <VitalsChart vitalType={selectedVitalType} />
       </div>
-      
+      <VitalReminders />
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
         {/* Calendar Section */}
         <div className="md:col-span-1">
