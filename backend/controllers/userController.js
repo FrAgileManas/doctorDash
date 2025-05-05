@@ -14,7 +14,7 @@ const COMMUNICATION_SERVICES_CONNECTION_STRING = process.env.COMMUNICATION_SERVI
 const emailClient = new EmailClient(COMMUNICATION_SERVICES_CONNECTION_STRING);
 
 // Reusable email notification function
-async function sendNotificationEmail(userEmail, subject, htmlContent) {
+export async function sendNotificationEmail(userEmail, subject, htmlContent) {
   try {
     const emailMessage = {
       senderAddress: "DoNotReply@d718c6b6-e8fb-4927-9631-85ded959af50.azurecomm.net",
@@ -638,5 +638,4 @@ export {
     finalizeBooking,
     releaseHeldSlot,
     resendConfirmationEmail,
-    sendNotificationEmail,
 }

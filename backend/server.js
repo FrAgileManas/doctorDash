@@ -6,7 +6,8 @@ import connectCloudinary from "./config/cloudinary.js"
 import userRouter from "./routes/userRoute.js"
 import doctorRouter from "./routes/doctorRoute.js"
 import adminRouter from "./routes/adminRoute.js"
-  
+import setupReminderScheduler from "./utils/reminderScheduler.js"
+import setupAppointmentReminderScheduler from "./utils/appointmentReminderScheduler.js"
 // app config
 const app = express()
 const port = process.env.PORT || 4000
@@ -25,5 +26,9 @@ app.use("/api/doctor", doctorRouter)
 app.get("/", (req, res) => {
   res.send("API Working")
 });
+
+setupReminderScheduler();
+setupAppointmentReminderScheduler();
+
 
 app.listen(port, () => console.log(`Server started on PORT:${port}`))

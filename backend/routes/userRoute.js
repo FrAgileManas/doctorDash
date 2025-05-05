@@ -1,6 +1,8 @@
 import express from 'express';
 import { loginUser, registerUser, getProfile, updateProfile, bookAppointment, listAppointment, cancelAppointment, paymentRazorpay, verifyRazorpay, addReview, deleteReview,holdSlot,finalizeBooking,releaseHeldSlot,resendConfirmationEmail } from '../controllers/userController.js';
 import { addVital, getVitalsByDate, updateVital, deleteVital, getAllVitals } from '../controllers/vitalController.js';
+import { getReminders, addReminder, updateReminder, deleteReminder, testReminderEmail } from '../controllers/reminderController.js';
+
 import { getRoom } from '../controllers/roomController.js';
 import upload from '../middleware/multer.js';
 import authUser from '../middleware/authUser.js';
@@ -35,5 +37,12 @@ userRouter.get("/all-vitals", authUser, getAllVitals)
 
 // Room endpoints
 userRouter.get("/room/:appointmentId", authUser, getRoom)
+
+// Reminder endpoints
+userRouter.get("/reminders", authUser, getReminders)
+userRouter.post("/reminders", authUser, addReminder)
+userRouter.put("/reminders/:id", authUser, updateReminder)
+userRouter.delete("/reminders/:id", authUser, deleteReminder)
+userRouter.post("/reminders/:id/test", authUser, testReminderEmail)
 
 export default userRouter;

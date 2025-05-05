@@ -154,6 +154,45 @@ const emailTemplates = {
           </div>
       </body>
       </html>
-    `
+    `,
+    appointmentReminder: (user, appointment, timeframe) => {
+        const doctorName = appointment.docData.name;
+        const speciality = appointment.docData.speciality || 'Specialist';
+        
+        return `
+          <html>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+              <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+                <div style="text-align: center; margin-bottom: 20px; background-color: #f0f8ff; padding: 10px; border-radius: 4px;">
+                  <h2 style="color: #3b82f6; margin: 0;">Appointment Reminder</h2>
+                  <p style="margin: 5px 0 0 0; color: #666;">Your appointment is ${timeframe} from now</p>
+                </div>
+                
+                <p>Hello ${user.name},</p>
+                
+                <p>This is a friendly reminder that your appointment with <strong>Dr. ${doctorName}</strong> (${speciality}) is <strong>${timeframe}</strong> from now.</p>
+                
+                <div style="background-color: #f9f9f9; padding: 15px; border-radius: 4px; margin: 20px 0;">
+                  <h3 style="margin-top: 0; color: #4b5563;">Appointment Details</h3>
+                  <p><strong>Date:</strong> ${appointment.slotDate}</p>
+                  <p><strong>Time:</strong> ${appointment.slotTime}</p>
+                  <p><strong>Doctor:</strong> Dr. ${doctorName}</p>
+                  <p><strong>Speciality:</strong> ${speciality}</p>
+                  ${appointment.amount ? `<p><strong>Consultation Fee:</strong> ₹${appointment.amount}</p>` : ''}
+                </div>
+                
+                <div style="text-align: center; margin: 30px 0;">
+                  <a href="${process.env.FRONTEND_URL}/appointments" style="background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold;">View Appointment Details</a>
+                </div>
+                
+                <div style="margin-top: 30px; padding-top: 15px; border-top: 1px solid #e0e0e0;">
+                  <p style="margin: 0; color: #666;">If you need to cancel or reschedule, please do so at least 4 hours before your appointment time.</p>
+                  <p style="margin: 20px 0 0 0;">Best regards,<br>DoctorDash Team</p>
+                </div>
+              </div>
+            </body>
+          </html>
+        `;
+      },
   };
   export default emailTemplates;
