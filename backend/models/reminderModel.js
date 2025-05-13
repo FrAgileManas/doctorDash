@@ -18,29 +18,29 @@ const reminderSchema = new mongoose.Schema({
   },
   time: {
     type: String,
-    required: true,
-    match: /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/ // HH:MM format
+    required: true
   },
   daysOfWeek: {
     type: [String],
+    default: [],
     validate: {
-      validator: function(days) {
+      validator: function(v) {
         if (this.frequency === 'weekly') {
-          // Must have at least one day selected for weekly frequency
-          return days && days.length > 0;
+          return v.length > 0;
         }
         return true;
       },
-      message: 'At least one day must be selected for weekly reminders'
-    },
-    enum: {
-      values: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
-      message: '{VALUE} is not a valid day of the week'
+      message: 'Weekly reminders must have at least one day selected'
     }
   },
   active: {
     type: Boolean,
     default: true
+  },
+  notificationMethod: {
+    type: [String],
+    enum: ['email', 'whatsapp'],
+    default: ['email']
   },
   lastSent: {
     type: Date,
@@ -48,79 +48,111 @@ const reminderSchema = new mongoose.Schema({
   },
   nextScheduled: {
     type: Date,
-    default: null
+    default: Date.now
   }
-}, {
-  timestamps: true
-});
+}, { timestamps: true });
 
-// Index for faster lookup when processing reminders
-reminderSchema.index({ userId: 1, active: 1, nextScheduled: 1 });
-
-// Pre-save hook to calculate the next scheduled date
+// Pre-save hook to calculate next scheduled time
 reminderSchema.pre('save', function(next) {
-  if (this.active) {
-    this.nextScheduled = calculateNextReminderTime(this);
+  // Only update nextScheduled if lastSent exists or reminder parameters changed
+  if (this.isModified('frequency') || this.isModified('time') || 
+      this.isModified('daysOfWeek') || this.isModified('active') || 
+      this.lastSent !== null) {
+    
+    this.nextScheduled = calculateNextScheduledTime(this);
   }
   next();
 });
 
-// Method to check if a reminder is due
-reminderSchema.methods.isDue = function() {
-  return this.active && this.nextScheduled && this.nextScheduled <= new Date();
-};
-
-// Helper function to calculate the next reminder time
-const calculateNextReminderTime = (reminder) => {
+// Function to calculate the next time a reminder should be sent
+function calculateNextScheduledTime(reminder) {
   const now = new Date();
+  let nextScheduled;
+  
+  if (reminder.lastSent) {
+    // If reminder was sent before, calculate next time from last sent
+    nextScheduled = new Date(reminder.lastSent);
+  } else {
+    // For first-time scheduling, use current time
+    nextScheduled = new Date(now);
+  }
+  
+  // Parse the time components from the time string (HH:MM)
   const [hours, minutes] = reminder.time.split(':').map(Number);
   
-  let nextDate = new Date();
-  nextDate.setHours(hours, minutes, 0, 0);
-  
-  // If the time already passed today, move to the next occurrence
-  if (nextDate <= now) {
-    nextDate.setDate(nextDate.getDate() + 1);
-  }
-  
   if (reminder.frequency === 'daily') {
-    return nextDate;
+    // For daily reminders, set the next occurrence to today at the specified time
+    nextScheduled.setHours(hours, minutes, 0, 0);
+    
+    // If the calculated time is in the past (already occurred today),
+    // move to tomorrow
+    if (nextScheduled <= now) {
+      nextScheduled.setDate(nextScheduled.getDate() + 1);
+    }
+    
   } else if (reminder.frequency === 'weekly') {
-    // Find the next day that matches one of the selected days
-    const dayMap = {
-      'sunday': 0,
-      'monday': 1,
-      'tuesday': 2,
-      'wednesday': 3,
-      'thursday': 4,
-      'friday': 5,
-      'saturday': 6
+    // For weekly reminders, find the next day of the week that matches
+    const currentDay = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
+    const daysMap = {
+      'sunday': 0, 'monday': 1, 'tuesday': 2, 'wednesday': 3,
+      'thursday': 4, 'friday': 5, 'saturday': 6
     };
     
-    const currentDay = nextDate.getDay();
-    let daysToAdd = 0;
-    let found = false;
+    // Convert user-selected days to day numbers
+    const selectedDays = reminder.daysOfWeek.map(day => daysMap[day.toLowerCase()]);
     
-    // Check up to 7 days ahead to find the next matching day
-    for (let i = 0; i < 7; i++) {
-      const checkDay = (currentDay + i) % 7;
-      const dayName = Object.keys(dayMap).find(key => dayMap[key] === checkDay);
-      
-      if (reminder.daysOfWeek.includes(dayName)) {
-        daysToAdd = i;
-        found = true;
-        break;
-      }
+    if (selectedDays.length === 0) {
+      // Fallback if no days are selected (shouldn't happen due to validation)
+      selectedDays.push(currentDay);
     }
     
-    if (found) {
-      nextDate.setDate(nextDate.getDate() + daysToAdd);
-      return nextDate;
+    // Sort days to find the next upcoming day
+    selectedDays.sort((a, b) => a - b);
+    
+    // Find the next day that comes after the current day
+    let nextDay = selectedDays.find(day => day > currentDay);
+    
+    // If no day is found, wrap around to the first day of the next week
+    if (nextDay === undefined) {
+      nextDay = selectedDays[0];
+      // Calculate days to add (days until the end of the week + first selected day)
+      const daysToAdd = (7 - currentDay) + nextDay;
+      nextScheduled.setDate(nextScheduled.getDate() + daysToAdd);
+    } else {
+      // Calculate days to add (difference between next day and current day)
+      const daysToAdd = nextDay - currentDay;
+      nextScheduled.setDate(nextScheduled.getDate() + daysToAdd);
+    }
+    
+    // Set the time for the scheduled day
+    nextScheduled.setHours(hours, minutes, 0, 0);
+  }
+  
+  // If reminder was recently sent, ensure we don't schedule it too soon
+  if (reminder.lastSent) {
+    const minInterval = 12 * 60 * 60 * 1000; // 12 hours in milliseconds
+    const earliestNextTime = new Date(reminder.lastSent.getTime() + minInterval);
+    
+    if (nextScheduled < earliestNextTime) {
+      // If the calculated next time is too soon, add a day (for daily)
+      // or a week (for weekly)
+      if (reminder.frequency === 'daily') {
+        nextScheduled.setDate(nextScheduled.getDate() + 1);
+      } else {
+        nextScheduled.setDate(nextScheduled.getDate() + 7);
+      }
     }
   }
   
-  // Default fallback - should not reach here if data is valid
-  return null;
+  return nextScheduled;
+}
+
+// Add method to postpone reminder by a specified amount of time
+reminderSchema.methods.postpone = async function(hours = 1) {
+  const now = new Date();
+  // Set next scheduled time to current time + specified hours
+  this.nextScheduled = new Date(now.getTime() + (hours * 60 * 60 * 1000));
+  return this.save();
 };
 
 const Reminder = mongoose.model('Reminder', reminderSchema);

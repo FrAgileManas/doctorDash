@@ -10,14 +10,26 @@ const Contact = () => {
       </div>
 
       <div className='my-10 flex flex-col justify-center md:flex-row gap-10 mb-28 text-sm'>
-        <img className='w-full md:max-w-[360px]' src={assets.contact_image} alt="" />
+        <img className='w-full md:max-w-[360px]' src={assets.contact_image} alt="Contact" />
         <div className='flex flex-col justify-center items-start gap-6'>
-          <p className=' font-semibold text-lg text-gray-600'>OUR OFFICE</p>
-          <p className=' text-gray-500'>12345 Lorem IPsum <br /> Lorem 123, NewDelhi, INDIA</p>
-          <p className=' text-gray-500'>Tel: (123) 123-1234 <br /> Email: help@doctordash.com</p>
-          {/* <p className=' font-semibold text-lg text-gray-600'>CAREERS AT PRESCRIPTO</p>
-          <p className=' text-gray-500'>Learn more about our teams and job openings.</p>
-          <button className='border border-black px-8 py-4 text-sm hover:bg-black hover:text-white transition-all duration-500'>Explore Jobs</button> */}
+          <p className='font-semibold text-lg text-gray-600'>OUR OFFICE</p>
+          <p className='text-gray-500'>
+            12345 Lorem IPsum <br />
+            Lorem 123, NewDelhi, INDIA
+          </p>
+          <p className='text-gray-500'>
+            Tel: (123) 123-1234 <br />
+            Email: help@doctordash.com
+          </p>
+
+          {/* Download Button */}
+          <a
+            href='https://pub-3ca5d58fe63a467aa33d2233d5329e64.r2.dev/DoctorDash%20Setup%200.0.0.exe' // Update with your actual file path or link
+            download
+            className='mt-4 px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition duration-200 text-sm font-medium shadow-md'
+          >
+            Download Doctor Panel
+          </a>
         </div>
       </div>
 
