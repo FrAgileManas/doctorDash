@@ -622,6 +622,57 @@ const releaseHeldSlot = async (req, res) => {
         res.json({ success: false, message: error.message });
     }
 };
+// Add this function to your userController.js file
+
+// Update user notification preferences
+export const updateNotificationPreferences = async (req, res) => {
+    try {
+      const { notificationMethods } = req.body;
+      
+      if (!notificationMethods || !Array.isArray(notificationMethods)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please provide valid notification methods'
+        });
+      }
+      
+      const validMethods = ['email', 'whatsapp'];
+      
+      // Validate that all provided methods are valid
+      const allValid = notificationMethods.every(method => validMethods.includes(method));
+      if (!allValid) {
+        return res.status(400).json({
+          success: false,
+          message: `Notification methods must be one of: ${validMethods.join(', ')}`
+        });
+      }
+      
+      // If whatsapp is selected, ensure user has a valid phone number
+      if (notificationMethods.includes('whatsapp') && 
+          (!req.user.phone || req.user.phone === '000000000')) {
+        return res.status(400).json({
+          success: false,
+          message: 'A valid phone number is required for WhatsApp notifications'
+        });
+      }
+      
+      // Update user preferences
+      req.user.notificationPreferences = notificationMethods;
+      await req.user.save();
+      
+      return res.status(200).json({
+        success: true,
+        message: 'Notification preferences updated successfully',
+        preferences: req.user.notificationPreferences
+      });
+    } catch (error) {
+      console.error('Error updating notification preferences:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to update notification preferences'
+      });
+    }
+  };
 export {
     loginUser,
     registerUser,
