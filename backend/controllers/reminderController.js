@@ -264,7 +264,7 @@ const sendReminderEmail = async (reminder) => {
     senderAddress: senderAddress,
     content: {
       subject: `Time to track your ${vitalName}`,
-      plainText: `Hi ${userName},\n\nThis is a friendly reminder to log your ${vitalName} reading in your health tracker.\n\nStaying consistent with your health tracking helps you and your healthcare provider make better decisions about your care.\n\nSimply open your health app or click the link below to log your reading now:\n${process.env.FRONTEND_URL}/tracker\n\nBest regards,\nYour Health App Team`,
+      plainText: `Hi ${userName},\n\nThis is a friendly reminder to log your ${vitalName} reading in your health tracker.\n\nStaying consistent with your health tracking helps you and your healthcare provider make better decisions about your care.\n\nSimply open your health app or click the link below to log your reading now:\n${process.env.FRONTEND_URL}/redirect\n\nBest regards,\nYour Health App Team`,
       html: `
         <html>
           <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -276,7 +276,7 @@ const sendReminderEmail = async (reminder) => {
               <p>This is a friendly reminder to log your <strong>${vitalName}</strong> reading in your health tracker.</p>
               <p>Staying consistent with your health tracking helps you and your healthcare provider make better decisions about your care.</p>
               <div style="text-align: center; margin: 30px 0;">
-                <a href="${process.env.FRONTEND_URL}/tracker" style="background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold;">Log Your Reading Now</a>
+                <a href="https://cheetah-humble-dolphin.ngrok-free.app/redirect" style="background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold;">Log Your Reading Now</a>
               </div>
               <p>Best regards,<br>Your Health App Team</p>
             </div>

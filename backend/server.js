@@ -42,6 +42,16 @@ app.get("/", (req, res) => {
 
   res.send(`API Working — Current IST Time: ${timeString}`);
 });
+app.get('/redirect', (req, res) => {
+  const userAgent = req.headers['user-agent'] || '';
+  const isMobile = /mobile/i.test(userAgent);
+
+  const redirectUrl = isMobile
+    ? 'https://wa.me/15551415789'
+    : `${process.env.FRONTEND_URL}/tracker`;
+
+  res.redirect(302, redirectUrl);
+});
 
 
 setupReminderScheduler();
