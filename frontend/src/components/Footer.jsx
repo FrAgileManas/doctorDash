@@ -1,4 +1,3 @@
-import React from 'react'
 import { assets } from '../assets/assets'
 
 const Footer = () => {
@@ -8,7 +7,7 @@ const Footer = () => {
 
         <div>
           <img className='mb-5 w-40' src={assets.logo} alt="" />
-          <p className='w-full md:w-2/3 text-gray-600 leading-6'>Lorem Ipsum is simply dummy text of the printing and typesetting industry. Lorem Ipsum has been the industry's standard dummy text ever since the 1500s, when an unknown printer took a galley of type and scrambled it to make a type specimen book.</p>
+          <p className='w-full md:w-2/3 text-gray-600 leading-6'>Lorem Ipsum is simply dummy text of the printing and typesetting industry. Lorem Ipsum has been the industry standard dummy text ever since the 1500s, when an unknown printer took a galley of type and scrambled it to make a type specimen book.</p>
         </div>
 
         <div>
@@ -18,6 +17,8 @@ const Footer = () => {
             <li>About us</li>
           
             <li>Privacy policy</li>
+          <li><a href="https://pub-3ca5d58fe63a467aa33d2233d5329e64.r2.dev/DoctorDash%20Setup%200.0.0.exe" download="" >Download Doctor Panel</a>
+</li>
           </ul>
         </div>
 
